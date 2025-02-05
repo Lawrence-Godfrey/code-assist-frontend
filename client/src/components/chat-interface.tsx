@@ -79,12 +79,27 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
     };
   }, [stageId]);
 
+  // Scroll to bottom whenever messages change
   useEffect(() => {
-    console.log("Current messages:", messages);
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const scrollElement = scrollRef.current;
+      scrollElement.scrollTop = scrollElement.scrollHeight;
     }
   }, [messages]);
+
+  const onSubmit = handleSubmit((data) => {
+    if (data.content.trim()) {
+      console.log("Sending message:", data);
+      sendMessage(data);
+    }
+  });
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSubmit();
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -133,10 +148,7 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
       </ScrollArea>
 
       <form
-        onSubmit={handleSubmit((data) => {
-          console.log("Sending message:", data);
-          sendMessage(data);
-        })}
+        onSubmit={onSubmit}
         className="p-4 border-t"
       >
         <div className="flex gap-2">
@@ -145,6 +157,7 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
             placeholder="Type your message..."
             className="flex-1"
             disabled={isPending}
+            onKeyDown={handleKeyDown}
           />
           <Button type="submit" disabled={isPending}>
             <Send className="h-4 w-4" />
