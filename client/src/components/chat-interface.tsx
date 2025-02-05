@@ -16,8 +16,13 @@ interface ChatInterfaceProps {
 
 export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const { register, handleSubmit, reset } = useForm({
+  const { register, handleSubmit, reset, formState: { errors } } = useForm({
     resolver: zodResolver(insertMessageSchema),
+    defaultValues: {
+      content: "",
+      stageId,
+      role: "user"
+    }
   });
 
   const { data: messages = [], isLoading } = useQuery<Message[]>({
@@ -25,11 +30,11 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
   });
 
   const { mutate: sendMessage, isPending } = useMutation({
-    mutationFn: async (content: string) => {
+    mutationFn: async (data: { content: string }) => {
       return apiRequest("POST", `/api/stages/${stageId}/messages`, {
         stageId,
         role: "user",
-        content,
+        content: data.content,
       });
     },
     onSuccess: () => {
@@ -91,7 +96,10 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
       </ScrollArea>
 
       <form
-        onSubmit={handleSubmit((data) => sendMessage(data.content))}
+        onSubmit={handleSubmit((data) => {
+          console.log("Sending message:", data);
+          sendMessage(data);
+        })}
         className="p-4 border-t"
       >
         <div className="flex gap-2">
@@ -105,6 +113,9 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
             <Send className="h-4 w-4" />
           </Button>
         </div>
+        {errors.content && (
+          <p className="text-sm text-red-500 mt-1">{errors.content.message}</p>
+        )}
       </form>
     </div>
   );
