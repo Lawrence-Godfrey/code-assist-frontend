@@ -13,6 +13,8 @@ export default function Home() {
     queryKey: ["/api/stages"],
   });
 
+  const selectedStage = stages.find(stage => stage.id === selectedStageId);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto py-8">
@@ -43,13 +45,20 @@ export default function Home() {
           {/* Chat Interface */}
           <div className="col-span-8">
             <div className="bg-white rounded-lg shadow-sm h-[calc(100vh-12rem)] flex flex-col">
-              {selectedStageId && (
+              {selectedStage ? (
                 <>
                   <div className="p-4 border-b">
-                    <ApprovalButtons stageId={selectedStageId} />
+                    <ApprovalButtons stageId={selectedStage.id} />
                   </div>
-                  <ChatInterface stageId={selectedStageId} />
+                  <ChatInterface 
+                    stageId={selectedStage.id} 
+                    stageName={selectedStage.name}
+                  />
                 </>
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  Select a pipeline stage to view the conversation
+                </div>
               )}
             </div>
           </div>

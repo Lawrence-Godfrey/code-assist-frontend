@@ -7,13 +7,14 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMessageSchema, type Message } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Send } from "lucide-react";
+import { Send, User, Bot } from "lucide-react";
 
 interface ChatInterfaceProps {
   stageId: number;
+  stageName: string;
 }
 
-export function ChatInterface({ stageId }: ChatInterfaceProps) {
+export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { register, handleSubmit, reset } = useForm({
     resolver: zodResolver(insertMessageSchema),
@@ -45,20 +46,45 @@ export function ChatInterface({ stageId }: ChatInterfaceProps) {
 
   return (
     <div className="flex flex-col h-full">
+      <div className="border-b p-4">
+        <h2 className="text-lg font-semibold">{stageName}</h2>
+        <p className="text-sm text-gray-600">Chat with the agent to refine the stage output</p>
+      </div>
+
       <ScrollArea ref={scrollRef} className="flex-1 p-4">
         {isLoading ? (
-          <div className="text-center p-4">Loading...</div>
+          <div className="text-center p-4">Loading conversation history...</div>
+        ) : messages.length === 0 ? (
+          <div className="text-center p-4 text-gray-500">
+            No messages yet. Start the conversation!
+          </div>
         ) : (
           messages.map((message: Message) => (
             <div
               key={message.id}
-              className={`mb-4 p-3 rounded-lg max-w-[80%] ${
-                message.role === "user"
-                  ? "ml-auto bg-primary text-white"
-                  : "bg-gray-100"
+              className={`mb-4 flex gap-2 ${
+                message.role === "user" ? "justify-end" : "justify-start"
               }`}
             >
-              {message.content}
+              {message.role === "agent" && (
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                  <Bot className="h-4 w-4 text-blue-600" />
+                </div>
+              )}
+              <div
+                className={`p-3 rounded-lg max-w-[80%] ${
+                  message.role === "user"
+                    ? "bg-primary text-white"
+                    : "bg-gray-100"
+                }`}
+              >
+                {message.content}
+              </div>
+              {message.role === "user" && (
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <User className="h-4 w-4 text-primary" />
+                </div>
+              )}
             </div>
           ))
         )}
@@ -73,6 +99,7 @@ export function ChatInterface({ stageId }: ChatInterfaceProps) {
             {...register("content")}
             placeholder="Type your message..."
             className="flex-1"
+            disabled={isPending}
           />
           <Button type="submit" disabled={isPending}>
             <Send className="h-4 w-4" />
