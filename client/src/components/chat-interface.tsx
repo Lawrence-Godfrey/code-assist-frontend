@@ -28,7 +28,7 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
   });
 
   const { data: messages = [], isLoading } = useQuery<Message[]>({
-    queryKey: ["/api/stages", stageId, "messages"],
+    queryKey: [`/api/stages/${stageId}/messages`],
   });
 
   const { mutate: sendMessage, isPending } = useMutation({
@@ -38,11 +38,14 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
         role: "user",
         content: data.content,
       });
-      return response.json() as Promise<Message[]>;
+      const messages = await response.json() as Message[];
+      console.log("Received messages from server:", messages);
+      return messages;
     },
-    onSuccess: () => {
+    onSuccess: (newMessages) => {
+      console.log("Mutation succeeded, new messages:", newMessages);
       reset();
-      queryClient.invalidateQueries({ queryKey: ["/api/stages", stageId, "messages"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/stages/${stageId}/messages`] });
     },
     onError: (error) => {
       toast({
@@ -54,6 +57,30 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
   });
 
   useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'messages' && data.stageId === stageId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/stages/${stageId}/messages`] });
+      }
+    };
+
+    socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    return () => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.close();
+      }
+    };
+  }, [stageId]);
+
+  useEffect(() => {
+    console.log("Current messages:", messages);
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
