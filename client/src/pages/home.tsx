@@ -47,9 +47,11 @@ export default function Home() {
             <div className="bg-white rounded-lg shadow-sm h-[calc(100vh-12rem)] flex flex-col">
               {selectedStage ? (
                 <>
-                  <div className="p-4 border-b">
-                    <ApprovalButtons stageId={selectedStage.id} />
-                  </div>
+                  {selectedStage.status === 'waitingForApproval' && (
+                    <div className="p-4 border-b">
+                      <ApprovalButtons stageId={selectedStage.id} />
+                    </div>
+                  )}
                   <ChatInterface 
                     stageId={selectedStage.id} 
                     stageName={selectedStage.name}

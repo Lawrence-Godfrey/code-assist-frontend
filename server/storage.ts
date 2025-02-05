@@ -29,7 +29,7 @@ export class MemStorage implements IStorage {
     this.stageId = 1;
     this.msgId = 1;
 
-    // Add initial stages
+    // Add initial stages with empty status
     this.createPipelineStage({ name: "Requirements Gathering" });
     this.createPipelineStage({ name: "Technical Specification" });
     this.createPipelineStage({ name: "Implementation" });
@@ -49,7 +49,7 @@ export class MemStorage implements IStorage {
     const newStage: PipelineStage = {
       ...stage,
       id,
-      status: "pending",
+      status: "",
       isComplete: false,
       requirementsSummary: null,
     };
@@ -64,7 +64,7 @@ export class MemStorage implements IStorage {
     const updatedStage = { ...stage, ...updates };
     this.stages.set(id, updatedStage);
 
-    // If stage is approved, update the requirements summary for Requirements Gathering
+    // If stage is approved, update the requirements summary
     if (updates.isComplete && stage.name === "Requirements Gathering") {
       const messages = await this.getMessages(id);
       const requirements = messages
@@ -90,6 +90,13 @@ export class MemStorage implements IStorage {
       timestamp: new Date(),
     };
     this.msgs.set(id, newMessage);
+
+    // Update stage status to inProgress when first message is created
+    const stage = await this.getPipelineStage(message.stageId);
+    if (stage && !stage.status) {
+      await this.updatePipelineStage(stage.id, { status: "inProgress" });
+    }
+
     return newMessage;
   }
 
@@ -99,9 +106,16 @@ export class MemStorage implements IStorage {
 
     // Simulate different agent responses based on the stage
     let response: string;
+    let shouldRequestApproval = false;
+
     switch (stage.name) {
       case "Requirements Gathering":
-        response = "Could you please provide more details about the specific functionality you need? This will help me better understand the requirements.";
+        if (userMessage.toLowerCase().includes("yes") || userMessage.toLowerCase().includes("that's correct")) {
+          response = "Great! I think I have gathered all the necessary requirements. Please review them and approve if everything looks correct.";
+          shouldRequestApproval = true;
+        } else {
+          response = "Could you please provide more details about the specific functionality you need? This will help me better understand the requirements.";
+        }
         break;
       case "Technical Specification":
         response = "Based on the requirements, I suggest using the following technical approach. Let me know if you'd like me to adjust any part of this specification.";
@@ -116,8 +130,9 @@ export class MemStorage implements IStorage {
         response = "How can I help you with this stage?";
     }
 
-    // Add some context from the user's message
-    response += `\n\nRegarding your message: "${userMessage}", can you provide more details?`;
+    if (shouldRequestApproval) {
+      await this.updatePipelineStage(stageId, { status: "waitingForApproval" });
+    }
 
     return this.createMessage({
       stageId,

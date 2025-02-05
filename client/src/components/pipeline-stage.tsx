@@ -1,6 +1,6 @@
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Check, Clock, MessageSquare } from "lucide-react";
+import { Check, MessageSquare, Clock, AlertCircle } from "lucide-react";
 import type { PipelineStage } from "@shared/schema";
 
 interface PipelineStageProps {
@@ -26,15 +26,23 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
   };
 
   const statusIcons = {
-    pending: <Clock className="h-4 w-4" />,
+    "": null,
     inProgress: <MessageSquare className="h-4 w-4" />,
+    waitingForApproval: <AlertCircle className="h-4 w-4" />,
     complete: <Check className="h-4 w-4" />,
   };
 
   const statusColors = {
-    pending: "bg-gray-400 hover:bg-gray-500",
+    "": "hidden",
     inProgress: "bg-blue-500 hover:bg-blue-600",
+    waitingForApproval: "bg-yellow-500 hover:bg-yellow-600",
     complete: "bg-green-500 hover:bg-green-600",
+  };
+
+  const getStatusText = (status: string) => {
+    if (!status) return "";
+    if (status === "waitingForApproval") return "Waiting for Approval";
+    return status.replace(/([A-Z])/g, ' $1').trim(); // Add spaces before capital letters
   };
 
   return (
@@ -51,14 +59,16 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
           <h3 className={`font-semibold ${isSelected ? 'text-primary' : ''}`}>
             {stage.name}
           </h3>
-          <Badge 
-            className={`${statusColors[stage.status as keyof typeof statusColors]} text-white`}
-          >
-            <div className="flex items-center gap-1">
-              {statusIcons[stage.status as keyof typeof statusIcons]}
-              <span className="capitalize">{stage.status}</span>
-            </div>
-          </Badge>
+          {stage.status && (
+            <Badge 
+              className={`${statusColors[stage.status as keyof typeof statusColors]} text-white`}
+            >
+              <div className="flex items-center gap-1">
+                {statusIcons[stage.status as keyof typeof statusIcons]}
+                <span className="capitalize">{getStatusText(stage.status)}</span>
+              </div>
+            </Badge>
+          )}
         </div>
       </CardHeader>
       <CardContent className="p-4 pt-0">
