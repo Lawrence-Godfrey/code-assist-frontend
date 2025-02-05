@@ -38,34 +38,36 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
   };
 
   return (
-    <Card 
-      className={`cursor-pointer transition-all hover:shadow-md ${
-        isSelected ? 'ring-2 ring-primary shadow-sm' : ''
-      }`}
-      onClick={onClick}
-    >
-      <CardHeader className="p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold">{stage.name}</h3>
-          <Badge 
-            className={`${statusColors[stage.status as keyof typeof statusColors]} text-white`}
-          >
-            <div className="flex items-center gap-1">
-              {statusIcons[stage.status as keyof typeof statusIcons]}
-              <span className="capitalize">{stage.status}</span>
-            </div>
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="p-4 pt-0">
-        <p className="text-sm text-gray-600">{getStageDescription(stage.name)}</p>
-        {stage.requirementsSummary && (
-          <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
-            <p className="font-medium text-gray-900">Summary:</p>
-            <p className="text-gray-600">{stage.requirementsSummary}</p>
+    <div className="p-0.5">
+      <Card 
+        className={`cursor-pointer transition-all hover:shadow-md ${
+          isSelected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background shadow-sm' : ''
+        }`}
+        onClick={onClick}
+      >
+        <CardHeader className="p-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold">{stage.name}</h3>
+            <Badge 
+              className={`${statusColors[stage.status as keyof typeof statusColors]} text-white`}
+            >
+              <div className="flex items-center gap-1">
+                {statusIcons[stage.status as keyof typeof statusIcons]}
+                <span className="capitalize">{stage.status}</span>
+              </div>
+            </Badge>
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent className="p-4 pt-0">
+          <p className="text-sm text-gray-600">{getStageDescription(stage.name)}</p>
+          {stage.requirementsSummary && (
+            <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
+              <p className="font-medium text-gray-900">Summary:</p>
+              <p className="text-gray-600">{stage.requirementsSummary}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
