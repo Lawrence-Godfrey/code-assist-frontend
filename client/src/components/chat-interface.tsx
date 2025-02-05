@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMessageSchema, type Message } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Send, User, Bot } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
 interface ChatInterfaceProps {
   stageId: number;
@@ -16,6 +17,7 @@ interface ChatInterfaceProps {
 
 export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     resolver: zodResolver(insertMessageSchema),
     defaultValues: {
@@ -31,15 +33,23 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
 
   const { mutate: sendMessage, isPending } = useMutation({
     mutationFn: async (data: { content: string }) => {
-      return apiRequest("POST", `/api/stages/${stageId}/messages`, {
+      const response = await apiRequest("POST", `/api/stages/${stageId}/messages`, {
         stageId,
         role: "user",
         content: data.content,
       });
+      return response.json() as Promise<Message[]>;
     },
     onSuccess: () => {
       reset();
       queryClient.invalidateQueries({ queryKey: ["/api/stages", stageId, "messages"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error sending message",
+        description: (error as Error).message,
+        variant: "destructive",
+      });
     },
   });
 
