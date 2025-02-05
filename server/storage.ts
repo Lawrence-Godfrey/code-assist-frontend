@@ -14,6 +14,7 @@ export interface IStorage {
   updatePipelineStage(id: number, updates: Partial<PipelineStage>): Promise<PipelineStage>;
   getMessages(stageId: number): Promise<Message[]>;
   createMessage(message: InsertMessage): Promise<Message>;
+  simulateAgentResponse(stageId: number, userMessage: string): Promise<Message>;
 }
 
 export class MemStorage implements IStorage {
@@ -59,9 +60,21 @@ export class MemStorage implements IStorage {
   async updatePipelineStage(id: number, updates: Partial<PipelineStage>): Promise<PipelineStage> {
     const stage = await this.getPipelineStage(id);
     if (!stage) throw new Error("Stage not found");
-    
+
     const updatedStage = { ...stage, ...updates };
     this.stages.set(id, updatedStage);
+
+    // If stage is approved, update the requirements summary for Requirements Gathering
+    if (updates.isComplete && stage.name === "Requirements Gathering") {
+      const messages = await this.getMessages(id);
+      const requirements = messages
+        .filter(m => m.role === "user")
+        .map(m => m.content)
+        .join("\n");
+      updatedStage.requirementsSummary = `Requirements Summary:\n${requirements}`;
+      this.stages.set(id, updatedStage);
+    }
+
     return updatedStage;
   }
 
@@ -78,6 +91,39 @@ export class MemStorage implements IStorage {
     };
     this.msgs.set(id, newMessage);
     return newMessage;
+  }
+
+  async simulateAgentResponse(stageId: number, userMessage: string): Promise<Message> {
+    const stage = await this.getPipelineStage(stageId);
+    if (!stage) throw new Error("Stage not found");
+
+    // Simulate different agent responses based on the stage
+    let response: string;
+    switch (stage.name) {
+      case "Requirements Gathering":
+        response = "Could you please provide more details about the specific functionality you need? This will help me better understand the requirements.";
+        break;
+      case "Technical Specification":
+        response = "Based on the requirements, I suggest using the following technical approach. Let me know if you'd like me to adjust any part of this specification.";
+        break;
+      case "Implementation":
+        response = "I'm working on implementing the changes according to the technical specification. Would you like me to explain any part of the implementation?";
+        break;
+      case "Code Review":
+        response = "I've reviewed the code changes. Everything looks good, but please let me know if you'd like me to focus on any specific aspects.";
+        break;
+      default:
+        response = "How can I help you with this stage?";
+    }
+
+    // Add some context from the user's message
+    response += `\n\nRegarding your message: "${userMessage}", can you provide more details?`;
+
+    return this.createMessage({
+      stageId,
+      role: "agent",
+      content: response,
+    });
   }
 }
 

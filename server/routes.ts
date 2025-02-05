@@ -19,8 +19,28 @@ export function registerRoutes(app: Express) {
   });
 
   app.patch("/api/stages/:id", async (req, res) => {
-    const stage = await storage.updatePipelineStage(Number(req.params.id), req.body);
-    res.json(stage);
+    try {
+      const stage = await storage.updatePipelineStage(Number(req.params.id), req.body);
+
+      // If stage was approved, simulate the next stage starting
+      if (req.body.isComplete && req.body.status === "complete") {
+        const nextStageId = stage.id + 1;
+        const nextStage = await storage.getPipelineStage(nextStageId);
+        if (nextStage) {
+          await storage.updatePipelineStage(nextStageId, { status: "inProgress" });
+          // Create initial agent message for next stage
+          await storage.createMessage({
+            stageId: nextStageId,
+            role: "agent",
+            content: `Starting ${nextStage.name}. How would you like to proceed?`
+          });
+        }
+      }
+
+      res.json(stage);
+    } catch (error) {
+      res.status(400).json({ message: (error as Error).message });
+    }
   });
 
   app.get("/api/stages/:id/messages", async (req, res) => {
@@ -34,9 +54,28 @@ export function registerRoutes(app: Express) {
       res.status(400).json({ message: "Invalid message data" });
       return;
     }
-    
-    const message = await storage.createMessage(parsed.data);
-    res.json(message);
+
+    try {
+      // First create the user's message
+      const userMessage = await storage.createMessage(parsed.data);
+
+      // Then simulate the agent's response
+      const agentMessage = await storage.simulateAgentResponse(
+        userMessage.stageId,
+        userMessage.content
+      );
+
+      // Update stage status to inProgress if it was pending
+      const stage = await storage.getPipelineStage(userMessage.stageId);
+      if (stage && stage.status === "pending") {
+        await storage.updatePipelineStage(stage.id, { status: "inProgress" });
+      }
+
+      // Return both messages
+      res.json([userMessage, agentMessage]);
+    } catch (error) {
+      res.status(400).json({ message: (error as Error).message });
+    }
   });
 
   return createServer(app);
