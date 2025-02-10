@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,16 +7,21 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertMessageSchema, type Message } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Send, User, Bot } from "lucide-react";
+import { Send, User, Bot, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import { ApprovalButtons } from "@/components/approval-buttons";
+import { getWebSocketUrl } from "@/lib/websocket";
 
 interface ChatInterfaceProps {
   stageId: number;
   stageName: string;
+  onTechSpecLoading?: (isLoading: boolean) => void;
 }
 
-export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
+export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     resolver: zodResolver(insertMessageSchema),
@@ -28,24 +33,52 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
   });
 
   const { data: messages = [], isLoading } = useQuery<Message[]>({
-    queryKey: [`/api/stages/${stageId}/messages`],
+    queryKey: [`/api/stages/${stageId}/messages`] as const,
   });
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const { mutate: sendMessage, isPending } = useMutation({
     mutationFn: async (data: { content: string }) => {
+      console.log("Sending message to server");
       const response = await apiRequest("POST", `/api/stages/${stageId}/messages`, {
-        stageId,
         role: "user",
         content: data.content,
       });
-      const messages = await response.json() as Message[];
-      console.log("Received messages from server:", messages);
-      return messages;
+      return await response.json() as Message;
     },
-    onSuccess: (newMessages) => {
-      console.log("Mutation succeeded, new messages:", newMessages);
+    onMutate: async (newMessage) => {
+      console.log("onMutate called, adding pending response");
+      setPendingAgentResponses(prev => {
+        const newState = [...prev, Date.now()];
+        console.log("New pending responses state:", newState);
+        return newState;
+      });
+      
+      // Optimistically update with user message
+      await queryClient.cancelQueries({ queryKey: [`/api/stages/${stageId}/messages`] as const });
+      
+      const previousMessages = queryClient.getQueryData<Message[]>([`/api/stages/${stageId}/messages`] as const) || [];
+      const optimisticMessage: Message = {
+        id: Date.now(),
+        stageId,
+        role: "user",
+        content: newMessage.content,
+        timestamp: new Date(),
+      };
+      
+      queryClient.setQueryData([`/api/stages/${stageId}/messages`] as const, [...previousMessages, optimisticMessage]);
       reset();
-      queryClient.invalidateQueries({ queryKey: [`/api/stages/${stageId}/messages`] });
+      
+      return { previousMessages };
+    },
+    onSuccess: (newMessage) => {
+      queryClient.setQueryData([`/api/stages/${stageId}/messages`] as const, (old: Message[] | undefined) => {
+        if (!old) return [newMessage];
+        return old.map(msg => 
+          msg.id === Date.now() ? newMessage : msg
+        );
+      });
     },
     onError: (error) => {
       toast({
@@ -56,15 +89,66 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
     },
   });
 
+  const [pendingAgentResponses, setPendingAgentResponses] = useState<number[]>([]);
+
+  const stageIdRef = useRef(stageId);
+
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    stageIdRef.current = stageId;
+    const wsUrl = getWebSocketUrl('/ws');
+    console.log("Connecting to WebSocket:", wsUrl);
+    
     const socket = new WebSocket(wsUrl);
 
+    socket.onopen = () => {
+      console.log("WebSocket connected successfully");
+    };
+
+    socket.onclose = () => {
+      console.log("WebSocket connection closed");
+    };
+
     socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'messages' && data.stageId === stageId) {
-        queryClient.invalidateQueries({ queryKey: [`/api/stages/${stageId}/messages`] });
+      console.log("Raw WebSocket message:", event.data);
+      try {
+        const data = JSON.parse(event.data);
+        console.log("Parsed WebSocket data:", data);
+
+        if (data.type === 'messages' && data.stageId === stageIdRef.current) {
+          console.log("Processing messages for stage:", stageIdRef.current);
+          
+          // Check for thinking message first
+          const hasThinkingMessage = data.messages.some((msg: { type?: string; content?: string }) => 
+            msg.type === 'thinking' || 
+            (msg.content && typeof msg.content === 'string' && 
+             msg.content.includes("Building Technical Specification"))
+          );
+
+          if (hasThinkingMessage) {
+            console.log("Found thinking message - setting loading to true");
+            onTechSpecLoading?.(true);
+            return; // Don't process further
+          }
+
+          // Only process regular messages if no thinking message
+          const hasAgentResponse = data.messages.some((msg: { role?: string; type?: string }) => 
+            msg.role === 'agent' && 
+            msg.type !== 'thinking'
+          );
+
+          if (hasAgentResponse) {
+            console.log("Found regular agent response - clearing loading state");
+            onTechSpecLoading?.(false);
+            setPendingAgentResponses(prev => prev.slice(1));
+            setTimeout(() => textareaRef.current?.focus(), 100);
+          }
+
+          queryClient.invalidateQueries({ 
+            queryKey: [`/api/stages/${stageIdRef.current}/messages`] 
+          });
+        }
+      } catch (error) {
+        console.error("Error processing WebSocket message:", error);
       }
     };
 
@@ -73,19 +157,19 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
     };
 
     return () => {
+      console.log("Cleaning up WebSocket connection");
       if (socket.readyState === WebSocket.OPEN) {
         socket.close();
       }
     };
-  }, [stageId]);
+  }, [stageId, onTechSpecLoading]);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
-    if (scrollRef.current) {
-      const scrollElement = scrollRef.current;
-      scrollElement.scrollTop = scrollElement.scrollHeight;
+    if (messageListRef.current) {
+      messageListRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [messages]);
+  }, [messages.length, pendingAgentResponses.length]);
 
   const onSubmit = handleSubmit((data) => {
     if (data.content.trim()) {
@@ -101,6 +185,17 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
     }
   };
 
+  const shouldShowApprovalButtons = () => {
+    if (!messages.length) return false;
+    const lastMessage = messages[messages.length - 1];
+    return (
+      lastMessage.role === "agent" && 
+      lastMessage.content.includes("please click the \"Approve\" button")
+    );
+  };
+
+  console.log("Rendering with pending responses:", pendingAgentResponses);
+
   return (
     <div className="flex flex-col h-full">
       <div className="border-b p-4">
@@ -108,7 +203,7 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
         <p className="text-sm text-gray-600">Chat with the agent to refine the stage output</p>
       </div>
 
-      <ScrollArea ref={scrollRef} className="flex-1 p-4">
+      <ScrollArea className="flex-1 p-4">
         {isLoading ? (
           <div className="text-center p-4">Loading conversation history...</div>
         ) : messages.length === 0 ? (
@@ -116,34 +211,52 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
             No messages yet. Start the conversation!
           </div>
         ) : (
-          messages.map((message: Message) => (
-            <div
-              key={message.id}
-              className={`mb-4 flex gap-2 ${
-                message.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
-              {message.role === "agent" && (
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                  <Bot className="h-4 w-4 text-blue-600" />
-                </div>
-              )}
-              <div
-                className={`p-3 rounded-lg max-w-[80%] ${
-                  message.role === "user"
-                    ? "bg-primary text-white"
-                    : "bg-gray-100"
-                }`}
+          <div ref={messageListRef}>
+            {messages.map((message: Message) => (
+              <div 
+                key={message.id}
+                className={cn(
+                  "flex gap-3 p-4",
+                  message.role === "user" ? "justify-end" : "justify-start"
+                )}
               >
-                {message.content}
-              </div>
-              {message.role === "user" && (
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                  <User className="h-4 w-4 text-primary" />
+                {message.role === "agent" && (
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Bot className="h-4 w-4 text-primary" />
+                  </div>
+                )}
+                <div
+                  className={cn(
+                    "max-w-[75%] rounded-lg px-4 py-2",
+                    message.role === "user"
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted"
+                  )}
+                  style={{ whiteSpace: 'pre-line' }}
+                >
+                  {message.content}
                 </div>
-              )}
-            </div>
-          ))
+                {message.role === "user" && (
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                    <User className="h-4 w-4 text-primary" />
+                  </div>
+                )}
+              </div>
+            ))}
+            {pendingAgentResponses.map((id, index) => (
+              <div key={id} className="flex items-center gap-3 p-4 animate-fade-in">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Bot className="h-4 w-4 text-primary" />
+                </div>
+                <div className="flex items-center gap-2 px-4 py-2 bg-muted rounded-lg">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <span className="text-muted-foreground text-sm">
+                    {index === 0 ? "Agent is thinking..." : "Queueing response..."}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </ScrollArea>
 
@@ -154,9 +267,10 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
         <div className="flex gap-2">
           <Textarea
             {...register("content")}
-            placeholder="Type your message..."
+            ref={register("content").ref}
+            placeholder={pendingAgentResponses.length > 0 ? "Please wait for the agent to respond..." : "Type your message..."}
             className="flex-1"
-            disabled={isPending}
+            disabled={isPending || pendingAgentResponses.length > 0}
             onKeyDown={handleKeyDown}
           />
           <Button type="submit" disabled={isPending}>
@@ -167,6 +281,15 @@ export function ChatInterface({ stageId, stageName }: ChatInterfaceProps) {
           <p className="text-sm text-red-500 mt-1">{errors.content.message}</p>
         )}
       </form>
+
+      {shouldShowApprovalButtons() && (
+        <div className="p-4 border-t">
+          <ApprovalButtons 
+            stageId={stageId} 
+            onTechSpecLoading={onTechSpecLoading}
+          />
+        </div>
+      )}
     </div>
   );
 }

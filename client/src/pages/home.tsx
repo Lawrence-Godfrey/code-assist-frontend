@@ -5,9 +5,12 @@ import { ChatInterface } from "@/components/chat-interface";
 import { ApprovalButtons } from "@/components/approval-buttons";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { PipelineStage as PipelineStageType } from "@shared/schema";
+import { useState } from "react";
+import { Loader2 } from "lucide-react";
 
 export default function Home() {
   const { selectedStageId, setSelectedStageId } = useStore();
+  const [techSpecLoading, setTechSpecLoading] = useState(false);
 
   const { data: stages = [], isLoading } = useQuery<PipelineStageType[]>({
     queryKey: ["/api/stages"],
@@ -20,9 +23,9 @@ export default function Home() {
       <div className="container mx-auto py-8">
         <h1 className="text-3xl font-bold mb-8">LLM Agent Pipeline</h1>
 
-        <div className="grid grid-cols-12 gap-6">
+        <div className="grid grid-cols-3 gap-6">
           {/* Pipeline Stages */}
-          <div className="col-span-4">
+          <div className="col-span-1">
             <h2 className="text-xl font-semibold mb-4">Pipeline Progress</h2>
             <ScrollArea className="h-[calc(100vh-12rem)]">
               {isLoading ? (
@@ -43,8 +46,17 @@ export default function Home() {
           </div>
 
           {/* Chat Interface */}
-          <div className="col-span-8">
-            <div className="bg-white rounded-lg shadow-sm h-[calc(100vh-12rem)] flex flex-col">
+          <div className="col-span-2">
+            <div className="bg-white rounded-lg shadow-sm h-[calc(100vh-12rem)] flex flex-col relative">
+              {techSpecLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-10">
+                  <div className="flex items-center gap-2 p-4 bg-blue-50 text-blue-600 rounded-lg shadow-sm">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Building Technical Specification...
+                  </div>
+                </div>
+              )}
+              
               {selectedStage ? (
                 <>
                   {selectedStage.status === 'waitingForApproval' && (
@@ -52,9 +64,10 @@ export default function Home() {
                       <ApprovalButtons stageId={selectedStage.id} />
                     </div>
                   )}
-                  <ChatInterface 
-                    stageId={selectedStage.id} 
+                  <ChatInterface
+                    stageId={selectedStage.id}
                     stageName={selectedStage.name}
+                    onTechSpecLoading={setTechSpecLoading}
                   />
                 </>
               ) : (
