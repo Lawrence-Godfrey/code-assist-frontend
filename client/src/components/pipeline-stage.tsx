@@ -2,6 +2,7 @@ import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Check, MessageSquare, Clock, AlertCircle } from "lucide-react";
 import type { PipelineStage } from "@shared/schema";
+import { cn } from "@/lib/utils";
 
 interface PipelineStageProps {
   stage: PipelineStage;
@@ -26,21 +27,20 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
   };
 
   const statusIcons = {
-    "": null,
     inProgress: <MessageSquare className="h-4 w-4" />,
-    waitingForApproval: <AlertCircle className="h-4 w-4" />,
-    complete: <Check className="h-4 w-4" />,
+    waitingForApproval: <Clock className="h-4 w-4" />,
+    completed: <Check className="h-4 w-4" />,
+    error: <AlertCircle className="h-4 w-4" />,
   };
 
   const statusColors = {
-    "": "hidden",
-    inProgress: "bg-blue-500 hover:bg-blue-600",
-    waitingForApproval: "bg-yellow-500 hover:bg-yellow-600",
-    complete: "bg-green-500 hover:bg-green-600",
+    inProgress: "bg-blue-500",
+    waitingForApproval: "bg-yellow-500",
+    completed: "bg-green-500",
+    error: "bg-red-500",
   };
 
   const getStatusText = (status: string) => {
-    if (!status) return "";
     if (status === "waitingForApproval") return "Waiting for Approval";
     return status.replace(/([A-Z])/g, ' $1').trim(); // Add spaces before capital letters
   };
@@ -61,11 +61,14 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
           </h3>
           {stage.status && (
             <Badge 
-              className={`${statusColors[stage.status as keyof typeof statusColors]} text-white`}
+              className={cn(
+                "text-white",
+                statusColors[stage.status as keyof typeof statusColors]
+              )}
             >
               <div className="flex items-center gap-1">
                 {statusIcons[stage.status as keyof typeof statusIcons]}
-                <span className="capitalize">{getStatusText(stage.status)}</span>
+                <span>{getStatusText(stage.status)}</span>
               </div>
             </Badge>
           )}
@@ -73,12 +76,6 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
       </CardHeader>
       <CardContent className="p-4 pt-0">
         <p className="text-sm text-gray-600">{getStageDescription(stage.name)}</p>
-        {stage.requirementsSummary && (
-          <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
-            <p className="font-medium text-gray-900">Summary:</p>
-            <p className="text-gray-600">{stage.requirementsSummary}</p>
-          </div>
-        )}
       </CardContent>
     </Card>
   );

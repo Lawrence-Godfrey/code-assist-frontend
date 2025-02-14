@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { ApprovalButtons } from "@/components/approval-buttons";
 import { getWebSocketUrl } from "@/lib/websocket";
 
+
 interface ChatInterfaceProps {
   stageId: number;
   stageName: string;
@@ -41,11 +42,63 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
   const { mutate: sendMessage, isPending } = useMutation({
     mutationFn: async (data: { content: string }) => {
       console.log("Sending message to server");
-      const response = await apiRequest("POST", `/api/stages/${stageId}/messages`, {
+      
+      // First, create and save the user message
+      await apiRequest("POST", `/api/stages/${stageId}/messages`, {
         role: "user",
         content: data.content,
+        stageId,
       });
-      return await response.json() as Message;
+
+      // Get updated messages including the newly saved message
+      const allMessages = await apiRequest("GET", `/api/stages/${stageId}/messages`);
+      const messageHistory = await allMessages.json();
+
+      console.log("messageHistory", messageHistory);
+
+      // Send to pipeline with message history
+      const pipelineResponse = await apiRequest("POST", "/api/pipeline", {
+        prompt_model_name: "gpt-4",
+        message_history: messageHistory.map((msg: Message) => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+      });
+
+      console.log(JSON.stringify({
+        prompt_model_name: "gpt-4",
+        message_history: messageHistory.map((msg: Message) => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+      }))
+
+      console.log({
+        prompt_model_name: "gpt-4",
+        message_history: messageHistory.map((msg: Message) => ({
+          role: msg.role,
+          content: msg.content,
+        })),
+      });
+      // print the raw response body
+      const pipelineResult = await pipelineResponse.json();
+      
+      
+      console.log("pipelineResult", pipelineResult);
+
+      // Save the assistant's response
+      await apiRequest("POST", `/api/stages/${stageId}/messages`, {
+        role: pipelineResult.response.role,
+        content: pipelineResult.response.content,
+        stageId,
+      });
+
+      // Invalidate the messages query to trigger a refresh
+      await queryClient.invalidateQueries({ 
+        queryKey: [`/api/stages/${stageId}/messages`] 
+      });
+
+      return pipelineResult.response;
     },
     onMutate: async (newMessage) => {
       console.log("onMutate called, adding pending response");
@@ -59,26 +112,15 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
       await queryClient.cancelQueries({ queryKey: [`/api/stages/${stageId}/messages`] as const });
       
       const previousMessages = queryClient.getQueryData<Message[]>([`/api/stages/${stageId}/messages`] as const) || [];
-      const optimisticMessage: Message = {
-        id: Date.now(),
-        stageId,
-        role: "user",
-        content: newMessage.content,
-        timestamp: new Date(),
-      };
       
-      queryClient.setQueryData([`/api/stages/${stageId}/messages`] as const, [...previousMessages, optimisticMessage]);
+      // For optimistic update, we only show the content - the real message will replace this on success
+      queryClient.setQueryData([`/api/stages/${stageId}/messages`] as const, [
+        ...previousMessages, 
+        { content: newMessage.content, role: "user" } as Message
+      ]);
       reset();
       
       return { previousMessages };
-    },
-    onSuccess: (newMessage) => {
-      queryClient.setQueryData([`/api/stages/${stageId}/messages`] as const, (old: Message[] | undefined) => {
-        if (!old) return [newMessage];
-        return old.map(msg => 
-          msg.id === Date.now() ? newMessage : msg
-        );
-      });
     },
     onError: (error) => {
       toast({
@@ -86,6 +128,13 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
         description: (error as Error).message,
         variant: "destructive",
       });
+      setPendingAgentResponses([]);
+      
+      // Revert to previous messages on error
+      queryClient.setQueryData(
+        [`/api/stages/${stageId}/messages`],
+        (old: Message[] | undefined) => old?.slice(0, -1) || []
+      );
     },
   });
 
