@@ -136,6 +136,10 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
         (old: Message[] | undefined) => old?.slice(0, -1) || []
       );
     },
+    onSuccess: () => {
+      // Clear pending responses when we get the agent's response
+      setPendingAgentResponses([]);
+    },
   });
 
   const [pendingAgentResponses, setPendingAgentResponses] = useState<number[]>([]);
