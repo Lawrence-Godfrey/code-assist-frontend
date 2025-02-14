@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { Request, Response } from "express";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
+import { log } from "./vite";
 
 const clients = new Set<WebSocket>();
 
@@ -10,6 +11,7 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 // Helper function to proxy requests to the backend API
 async function proxyRequest(req: Request, res: Response, method: string, path: string): Promise<void> {
   try {
+    log(`Proxying request to ${BACKEND_URL}${path}`, "proxy");
     const backendResponse = await fetch(`${BACKEND_URL}${path}`, {
       method,
       headers: {
@@ -18,8 +20,10 @@ async function proxyRequest(req: Request, res: Response, method: string, path: s
       body: (method === "GET" || method === "HEAD") ? undefined : JSON.stringify(req.body),
     });
     const data = await backendResponse.json();
+    log(`Received response from backend with status ${backendResponse.status}`, "proxy");
     res.status(backendResponse.status).json(data);
   } catch (error: unknown) {
+    log(`Error in proxy request: ${error}`, "proxy-error");
     if (error instanceof Error) {
       res.status(500).json({ message: error.toString() });
     } else {
@@ -29,6 +33,7 @@ async function proxyRequest(req: Request, res: Response, method: string, path: s
 }
 
 export function registerRoutes(app: Express) {
+  log("Starting to register routes...", "startup");
   const server = createServer(app);
 
   // Setup WebSocket server
@@ -56,24 +61,12 @@ export function registerRoutes(app: Express) {
     });
   }
 
-  app.get("/api/stages", (req, res) => {
-    return proxyRequest(req, res, "GET", "/api/stages");
-  });
-
-  app.get("/api/stages/:id", (req, res) => {
-    return proxyRequest(req, res, "GET", `/api/stages/${req.params.id}`);
-  });
-
-  app.patch("/api/stages/:id", (req, res) => {
-    return proxyRequest(req, res, "PATCH", `/api/stages/${req.params.id}`);
-  });
-
-  app.get("/api/stages/:id/messages", (req, res) => {
-    return proxyRequest(req, res, "GET", `/api/stages/${req.params.id}/messages`);
-  });
-
-  app.post("/api/stages/:id/messages", (req, res) => {
-    return proxyRequest(req, res, "POST", `/api/stages/${req.params.id}/messages`);
+  // Proxy all /api requests to the backend
+  app.all("/api/*", (req: Request, res: Response) => {
+    console.log('DEBUG - Hit proxy route:', req.method, req.path);
+    process.stdout.write(`DEBUG - Hit proxy route: ${req.method} ${req.path}\n`);
+    log(`Received API request: ${req.method} ${req.path}`, "proxy-route");
+    return proxyRequest(req, res, req.method, req.path);
   });
 
   return server;
