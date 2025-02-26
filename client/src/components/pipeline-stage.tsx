@@ -11,21 +11,6 @@ interface PipelineStageProps {
 }
 
 export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps) {
-  const getStageDescription = (name: string) => {
-    switch (name) {
-      case "Requirements Gathering":
-        return "Clarify and document project requirements";
-      case "Technical Specification":
-        return "Convert requirements into technical specifications";
-      case "Implementation":
-        return "Generate and implement code changes";
-      case "Code Review":
-        return "Review and validate code changes";
-      default:
-        return "";
-    }
-  };
-
   const statusIcons = {
     inProgress: <MessageSquare className="h-4 w-4" />,
     waitingForApproval: <Clock className="h-4 w-4" />,
@@ -42,8 +27,12 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
 
   const getStatusText = (status: string) => {
     if (status === "waitingForApproval") return "Waiting for Approval";
+    if (status === "not_started") return "";
     return status.replace(/([A-Z])/g, ' $1').trim(); // Add spaces before capital letters
   };
+
+  // Don't show status badge for "not_started" stages
+  const shouldShowStatus = stage.status && stage.status !== "not_started";
 
   return (
     <Card 
@@ -59,7 +48,7 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
           <h3 className={`font-semibold ${isSelected ? 'text-primary' : ''}`}>
             {stage.name}
           </h3>
-          {stage.status && (
+          {shouldShowStatus && (
             <Badge 
               className={cn(
                 "text-white",
@@ -75,7 +64,8 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
         </div>
       </CardHeader>
       <CardContent className="p-4 pt-0">
-        <p className="text-sm text-gray-600">{getStageDescription(stage.name)}</p>
+        {/* Use the description from the backend instead of hardcoding */}
+        <p className="text-sm text-gray-600">{stage.description || "No description available"}</p>
       </CardContent>
     </Card>
   );

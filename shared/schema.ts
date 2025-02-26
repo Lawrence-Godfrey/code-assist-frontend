@@ -5,6 +5,7 @@ import { z } from "zod";
 export const pipelineStages = pgTable("pipeline_stages", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  description: text("description"),
   status: text("status").notNull().default("pending"),
   requirementsSummary: text("requirements_summary"),
   isComplete: boolean("is_complete").notNull().default(false),

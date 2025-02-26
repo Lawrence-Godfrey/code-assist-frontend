@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, MessageSquarePlus, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useStore } from '@/lib/store';
@@ -21,6 +21,7 @@ const fetchChats = async (): Promise<Chat[]> => {
 
 // Function to create a new chat
 const createChat = async (): Promise<Chat> => {
+  // Fixed: Sending the expected request body parameters
   const response = await apiRequest('POST', '/api/chats', {
     description: null,
     create_default_stages: true
@@ -45,7 +46,7 @@ export const ChatList: React.FC = () => {
       const previousChats = queryClient.getQueryData<Chat[]>(['/api/chats']) || [];
       
       const optimisticChat: Chat = {
-        id: Date.now(),
+        id: Date.now(), // temporary ID
         created_at: new Date().toISOString(),
       };
       
@@ -100,54 +101,70 @@ export const ChatList: React.FC = () => {
   return (
     <div className="space-y-2">
       {chats.length === 0 ? (
-        <div className="text-center p-4 text-gray-500">
-          No chats yet.{' '}
+        <div className="text-center p-6 bg-gray-50 rounded-lg border border-gray-200">
+          <MessageSquarePlus className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+          <h3 className="text-gray-700 font-medium mb-2">No chats yet</h3>
+          <p className="text-gray-500 mb-4 text-sm">Start a new conversation to begin</p>
           <button
-            className="text-blue-500 hover:underline"
+            className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors"
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
-            Start a new conversation!
+            {mutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <MessageSquarePlus className="w-4 h-4" />
+            )}
+            {mutation.isPending ? 'Creating...' : 'Start a new conversation'}
           </button>
         </div>
       ) : (
         <>
           <button
-            className="w-full p-3 text-blue-500 hover:underline text-center"
+            className="w-full p-3 flex items-center justify-center gap-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md border border-blue-200 transition-colors font-medium mb-3"
             onClick={() => mutation.mutate()}
             disabled={mutation.isPending}
           >
+            {mutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <MessageSquarePlus className="w-4 h-4" />
+            )}
             {mutation.isPending ? 'Creating...' : 'New Chat'}
           </button>
-          {chats.map((chat) => (
-            <button
-              key={chat.id}
-              className={cn(
-                'w-full p-3 flex items-center gap-3 rounded-lg transition-colors',
-                'hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200',
-                'text-left',
-                selectedChatId === chat.id ? 'bg-blue-50 border-blue-200 border' : ''
-              )}
-              onClick={() => {
-                setSelectedChatId(chat.id);
-                // Optional: Also select the first stage if available
-                if (chat.stages && chat.stages.length > 0) {
-                  setSelectedStageId(chat.stages[0].id);
-                } else {
-                  // Clear selected stage if no stages are available
-                  setSelectedStageId(null);
-                }
-              }}
-            >
-              <MessageSquare className="w-5 h-5 text-gray-500" />
-              <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">Chat {chat.id}</div>
-                <div className="text-sm text-gray-500 truncate">
-                  {new Date(chat.created_at).toLocaleDateString()}
+          
+          {/* Sort chats by created_at in descending order to show newest first */}
+          {[...chats]
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .map((chat) => (
+              <button
+                key={chat.id}
+                className={cn(
+                  'w-full p-3 flex items-center gap-3 rounded-lg transition-colors',
+                  'hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200',
+                  'text-left',
+                  selectedChatId === chat.id ? 'bg-blue-50 border-blue-200 border' : ''
+                )}
+                onClick={() => {
+                  setSelectedChatId(chat.id);
+                  // Optional: Also select the first stage if available
+                  if (chat.stages && chat.stages.length > 0) {
+                    setSelectedStageId(chat.stages[0].id);
+                  } else {
+                    // Clear selected stage if no stages are available
+                    setSelectedStageId(null);
+                  }
+                }}
+              >
+                <MessageSquare className="w-5 h-5 text-gray-500 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">Chat {chat.id}</div>
+                  <div className="text-sm text-gray-500 truncate">
+                    {new Date(chat.created_at).toLocaleDateString()}
+                  </div>
                 </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            ))}
         </>
       )}
     </div>
