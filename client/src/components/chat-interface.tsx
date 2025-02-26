@@ -12,18 +12,21 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { ApprovalButtons } from "@/components/approval-buttons";
 import { getWebSocketUrl } from "@/lib/websocket";
-
+import { useStore } from "@/lib/store";
 
 interface ChatInterfaceProps {
   stageId: number;
   stageName: string;
+  isPendingChat?: boolean;
   onTechSpecLoading?: (isLoading: boolean) => void;
 }
 
-export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInterfaceProps) {
+export function ChatInterface({ stageId, stageName, isPendingChat = false, onTechSpecLoading }: ChatInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const { setSelectedChatId, setSelectedStageId, setPendingChat } = useStore();
+  
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     resolver: zodResolver(insertMessageSchema),
     defaultValues: {
@@ -33,25 +36,69 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
     }
   });
 
+  // Only fetch messages if not in pending chat mode
   const { data: messages = [], isLoading } = useQuery<Message[]>({
     queryKey: [`/api/stages/${stageId}/messages`] as const,
+    enabled: !isPendingChat, // Do not fetch messages for pending chats
   });
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [pendingAgentResponses, setPendingAgentResponses] = useState<number[]>([]);
+  const [approvalNeeded, setApprovalNeeded] = useState(false);
 
-  const { mutate: sendMessage, isPending } = useMutation({
-    mutationFn: async (data: { content: string }) => {
+  // Function to create a new chat directly (not using React Query's mutate)
+  const createNewChat = async () => {
+    const response = await apiRequest("POST", "/api/chats", {
+      description: null,
+      create_default_stages: true
+    });
+    return await response.json();
+  };
+
+  // Mutation for sending messages
+  const { mutate: sendMessage, isPending: isSendingMessage } = useMutation({
+    mutationFn: async (data: { content: string, chatId?: number }) => {
       console.log("Sending message to server");
       
-      // First, create and save the user message
-      await apiRequest("POST", `/api/stages/${stageId}/messages`, {
+      let chatId = data.chatId;
+      let actualStageId = stageId;
+      
+      // If this is a pending chat, create the chat first
+      if (isPendingChat) {
+        try {
+          setIsCreatingChat(true);
+          // Create new chat directly
+          const newChat = await createNewChat();
+          chatId = newChat.id;
+          
+          // Set the selected chat ID and update pending state
+          setSelectedChatId(chatId);
+          setPendingChat(false);
+          
+          // Get the first stage ID from the new chat
+          if (newChat.stages && newChat.stages.length > 0) {
+            actualStageId = newChat.stages[0].id;
+            setSelectedStageId(actualStageId);
+          }
+          
+          // Invalidate chat list query to refresh it
+          queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+          setIsCreatingChat(false);
+        } catch (error) {
+          setIsCreatingChat(false);
+          console.error("Error creating chat:", error);
+          throw new Error("Failed to create chat");
+        }
+      }
+      
+      // Now save the user message to the appropriate stage
+      await apiRequest("POST", `/api/stages/${actualStageId}/messages`, {
         role: "user",
         content: data.content,
-        stageId,
       });
 
       // Get updated messages including the newly saved message
-      const allMessages = await apiRequest("GET", `/api/stages/${stageId}/messages`);
+      const allMessages = await apiRequest("GET", `/api/stages/${actualStageId}/messages`);
       const messageHistory = await allMessages.json();
 
       console.log("messageHistory", messageHistory);
@@ -65,44 +112,29 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
         })),
       });
 
-      console.log(JSON.stringify({
-        prompt_model_name: "gpt-4",
-        message_history: messageHistory.map((msg: Message) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-      }))
-
-      console.log({
-        prompt_model_name: "gpt-4",
-        message_history: messageHistory.map((msg: Message) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-      });
-      // print the raw response body
+      // Print the raw response body
       const pipelineResult = await pipelineResponse.json();
       
-      
       console.log("pipelineResult", pipelineResult);
+
+      // Save the received message to the db
+      await apiRequest("POST", `/api/stages/${actualStageId}/messages`, {
+        role: pipelineResult.response.role,
+        content: pipelineResult.response.content,
+        stageId: actualStageId,
+      });
 
       // Update approval needed state
       setApprovalNeeded(!!pipelineResult.approval_needed);
 
-      // Save the assistant's response
-      await apiRequest("POST", `/api/stages/${stageId}/messages`, {
-        role: pipelineResult.response.role,
-        content: pipelineResult.response.content,
-        stageId,
-      });
-
       // Invalidate the messages query to trigger a refresh
       await queryClient.invalidateQueries({ 
-        queryKey: [`/api/stages/${stageId}/messages`] 
+        queryKey: [`/api/stages/${actualStageId}/messages`] 
       });
 
-      return pipelineResult.response;
+      return { response: pipelineResult.response, actualStageId };
     },
+
     onMutate: async (newMessage) => {
       console.log("onMutate called, adding pending response");
       setPendingAgentResponses(prev => {
@@ -114,21 +146,24 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
       // Reset approval state when sending new message
       setApprovalNeeded(false);
       
-      // Optimistically update with user message
-      await queryClient.cancelQueries({ queryKey: [`/api/stages/${stageId}/messages`] as const });
+      if (!isPendingChat) {
+        // Optimistically update with user message (only for existing chats)
+        await queryClient.cancelQueries({ queryKey: [`/api/stages/${stageId}/messages`] as const });
+        
+        const previousMessages = queryClient.getQueryData<Message[]>([`/api/stages/${stageId}/messages`] as const) || [];
+        
+        // For optimistic update, we only show the content - the real message will replace this on success
+        queryClient.setQueryData([`/api/stages/${stageId}/messages`] as const, [
+          ...previousMessages, 
+          { content: newMessage.content, role: "user" } as Message
+        ]);
+      }
       
-      const previousMessages = queryClient.getQueryData<Message[]>([`/api/stages/${stageId}/messages`] as const) || [];
-      
-      // For optimistic update, we only show the content - the real message will replace this on success
-      queryClient.setQueryData([`/api/stages/${stageId}/messages`] as const, [
-        ...previousMessages, 
-        { content: newMessage.content, role: "user" } as Message
-      ]);
       reset();
       
-      return { previousMessages };
+      return { previousMessages: isPendingChat ? [] : queryClient.getQueryData([`/api/stages/${stageId}/messages`]) };
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
       toast({
         title: "Error sending message",
         description: (error as Error).message,
@@ -138,24 +173,33 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
       setApprovalNeeded(false);
       
       // Revert to previous messages on error
-      queryClient.setQueryData(
-        [`/api/stages/${stageId}/messages`],
-        (old: Message[] | undefined) => old?.slice(0, -1) || []
-      );
+      if (!isPendingChat && context?.previousMessages) {
+        queryClient.setQueryData(
+          [`/api/stages/${stageId}/messages`],
+          context.previousMessages
+        );
+      }
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       // Clear pending responses when we get the agent's response
       setPendingAgentResponses([]);
+      
+      // If the stage ID changed (due to new chat creation), update queries
+      if (result.actualStageId !== stageId) {
+        queryClient.invalidateQueries({ 
+          queryKey: [`/api/stages/${result.actualStageId}/messages`] 
+        });
+      }
     },
   });
-
-  const [pendingAgentResponses, setPendingAgentResponses] = useState<number[]>([]);
-  const [approvalNeeded, setApprovalNeeded] = useState(false);
 
   const stageIdRef = useRef(stageId);
 
   useEffect(() => {
     stageIdRef.current = stageId;
+    
+    if (isPendingChat) return; // Don't set up WebSocket for pending chats
+    
     const wsUrl = getWebSocketUrl('/ws');
     console.log("Connecting to WebSocket:", wsUrl);
     
@@ -228,7 +272,7 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
         socket.close();
       }
     };
-  }, [stageId, onTechSpecLoading]);
+  }, [stageId, onTechSpecLoading, isPendingChat]);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
@@ -255,25 +299,35 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
     return approvalNeeded;
   };
 
-  console.log("Rendering with pending responses:", pendingAgentResponses);
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
+  const isPending = isSendingMessage || isCreatingChat;
+
+  // For pending chats, show an empty state
+  const displayMessages = isPendingChat ? [] : messages;
 
   return (
     <div className="flex flex-col h-full">
       <div className="border-b p-4">
         <h2 className="text-lg font-semibold">{stageName}</h2>
-        <p className="text-sm text-gray-600">Chat with the agent to refine the stage output</p>
+        <p className="text-sm text-gray-600">
+          {isPendingChat 
+            ? "Send a message to start this conversation" 
+            : "Chat with the agent to refine the stage output"}
+        </p>
       </div>
 
       <ScrollArea className="flex-1 p-4">
-        {isLoading ? (
+        {isLoading && !isPendingChat ? (
           <div className="text-center p-4">Loading conversation history...</div>
-        ) : messages.length === 0 ? (
+        ) : displayMessages.length === 0 ? (
           <div className="text-center p-4 text-gray-500">
-            No messages yet. Start the conversation!
+            {isPendingChat 
+              ? "Type a message below to start a new conversation"
+              : "No messages yet. Start the conversation!"}
           </div>
         ) : (
           <div ref={messageListRef}>
-            {messages.map((message: Message) => (
+            {displayMessages.map((message: Message) => (
               <div 
                 key={message.id}
                 className={cn(
@@ -312,7 +366,9 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
                 <div className="flex items-center gap-2 px-4 py-2 bg-muted rounded-lg">
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                   <span className="text-muted-foreground text-sm">
-                    {index === 0 ? "Agent is thinking..." : "Queueing response..."}
+                    {index === 0 ? (
+                      isPendingChat ? "Creating chat and processing response..." : "Agent is thinking..."
+                    ) : "Queueing response..."}
                   </span>
                 </div>
               </div>
@@ -329,9 +385,9 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
           <Textarea
             {...register("content")}
             ref={register("content").ref}
-            placeholder={pendingAgentResponses.length > 0 ? "Please wait for the agent to respond..." : "Type your message..."}
+            placeholder={isPending ? "Please wait..." : "Type your message..."}
             className="flex-1"
-            disabled={isPending || pendingAgentResponses.length > 0}
+            disabled={isPending}
             onKeyDown={handleKeyDown}
           />
           <Button type="submit" disabled={isPending}>
