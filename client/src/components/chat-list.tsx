@@ -3,11 +3,14 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiRequest, queryClient } from '@/lib/queryClient';
+import { useStore } from '@/lib/store';
+import { useToast } from '@/hooks/use-toast';
 
 // Define the Chat interface matching the backend Chat model
 interface Chat {
-  id: string;
+  id: number;
   created_at: string;
+  stages?: any[];
 }
 
 // Function to fetch chats from the backend
@@ -18,13 +21,19 @@ const fetchChats = async (): Promise<Chat[]> => {
 
 // Function to create a new chat
 const createChat = async (): Promise<Chat> => {
-  const response = await apiRequest('POST', '/api/chats');
+  const response = await apiRequest('POST', '/api/chats', {
+    description: null,
+    create_default_stages: true
+  });
   return await response.json();
 };
 
 export const ChatList: React.FC = () => {
+  const { toast } = useToast();
+  const { selectedChatId, setSelectedChatId, setSelectedStageId } = useStore();
+  
   const { data: chats = [], isLoading, error } = useQuery<Chat[]>({
-    queryKey: ['/api/chats'] as const, // Consistent with ChatInterface query key style
+    queryKey: ['/api/chats'] as const,
     queryFn: fetchChats,
   });
 
@@ -36,7 +45,7 @@ export const ChatList: React.FC = () => {
       const previousChats = queryClient.getQueryData<Chat[]>(['/api/chats']) || [];
       
       const optimisticChat: Chat = {
-        id: `temp-${Date.now()}`,
+        id: Date.now(),
         created_at: new Date().toISOString(),
       };
       
@@ -47,10 +56,28 @@ export const ChatList: React.FC = () => {
       // Revert on error
       queryClient.setQueryData(['/api/chats'], context?.previousChats);
       console.error('Error creating chat:', error);
+      toast({
+        title: "Error creating chat",
+        description: "Please try again later",
+        variant: "destructive"
+      });
     },
-    onSuccess: () => {
+    onSuccess: (newChat) => {
       // Invalidate to fetch the real data
       queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      
+      // Set the selected chat
+      setSelectedChatId(newChat.id);
+      
+      // If the chat has stages, select the first one
+      if (newChat.stages && newChat.stages.length > 0) {
+        setSelectedStageId(newChat.stages[0].id);
+      }
+      
+      toast({
+        title: "Chat created",
+        description: "Your new conversation is ready",
+      });
     },
   });
 
@@ -98,9 +125,19 @@ export const ChatList: React.FC = () => {
               className={cn(
                 'w-full p-3 flex items-center gap-3 rounded-lg transition-colors',
                 'hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200',
-                'text-left'
+                'text-left',
+                selectedChatId === chat.id ? 'bg-blue-50 border-blue-200 border' : ''
               )}
-              onClick={() => {}}
+              onClick={() => {
+                setSelectedChatId(chat.id);
+                // Optional: Also select the first stage if available
+                if (chat.stages && chat.stages.length > 0) {
+                  setSelectedStageId(chat.stages[0].id);
+                } else {
+                  // Clear selected stage if no stages are available
+                  setSelectedStageId(null);
+                }
+              }}
             >
               <MessageSquare className="w-5 h-5 text-gray-500" />
               <div className="flex-1 min-w-0">

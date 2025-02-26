@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useStore } from "@/lib/store";
 import { PipelineStage } from "@/components/pipeline-stage";
 import { ChatInterface } from "@/components/chat-interface";
@@ -9,25 +9,83 @@ import { ChatList } from "@/components/chat-list";
 import type { PipelineStage as PipelineStageType } from "@shared/schema";
 import { useState } from "react";
 import { Loader2, MessageSquarePlus } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+
+// Function to create a new chat
+const createChat = async () => {
+  const response = await apiRequest('POST', '/api/chats', {
+    description: null,
+    create_default_stages: true
+  });
+  return await response.json();
+};
 
 export default function Home() {
-  const { selectedStageId, setSelectedStageId } = useStore();
+  const { selectedChatId, selectedStageId, setSelectedChatId, setSelectedStageId } = useStore();
   const [techSpecLoading, setTechSpecLoading] = useState(false);
+  const { toast } = useToast();
 
-  const { data: stages = [], isLoading } = useQuery<PipelineStageType[]>({
-    queryKey: ["/api/stages"],
+  // Fetch stages for the selected chat
+  const { 
+    data: stages = [], 
+    isLoading: stagesLoading 
+  } = useQuery<PipelineStageType[]>({
+    queryKey: ["/api/chats", selectedChatId, "stages"],
+    queryFn: async () => {
+      if (!selectedChatId) return [];
+      const response = await apiRequest('GET', `/api/chats/${selectedChatId}/stages`);
+      return await response.json();
+    },
+    enabled: !!selectedChatId, // Only run this query if we have a selected chat
   });
 
   const selectedStage = stages.find(stage => stage.id === selectedStageId);
+  
+  const mutation = useMutation({
+    mutationFn: createChat,
+    onSuccess: (newChat) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      
+      // Set the selected chat
+      setSelectedChatId(newChat.id);
+      
+      // Navigate to the new chat by selecting the first stage
+      if (newChat.stages && newChat.stages.length > 0) {
+        setSelectedStageId(newChat.stages[0].id);
+      }
+      
+      toast({
+        title: "Chat created",
+        description: "Your new conversation is ready",
+      });
+    },
+    onError: (error) => {
+      console.error('Error creating chat:', error);
+      toast({
+        title: "Error creating chat",
+        description: "Please try again later",
+        variant: "destructive"
+      });
+    }
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto py-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">Code Assistant</h1>
-          <Button className="flex items-center gap-2" onClick={() => {}}>
-            <MessageSquarePlus className="w-4 h-4" />
-            New Chat
+          <Button 
+            className="flex items-center gap-2" 
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+          >
+            {mutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <MessageSquarePlus className="w-4 h-4" />
+            )}
+            {mutation.isPending ? 'Creating...' : 'New Chat'}
           </Button>
         </div>
 
@@ -45,8 +103,16 @@ export default function Home() {
             <div className="bg-white rounded-lg shadow-sm p-4">
               <h2 className="text-xl font-semibold mb-4">Pipeline Progress</h2>
               <ScrollArea className="h-[calc(100vh-16rem)]">
-                {isLoading ? (
+                {!selectedChatId ? (
+                  <div className="text-center p-4 text-gray-500">
+                    Please select or create a chat first
+                  </div>
+                ) : stagesLoading ? (
                   <div className="text-center p-4">Loading stages...</div>
+                ) : stages.length === 0 ? (
+                  <div className="text-center p-4 text-gray-500">
+                    No stages found for this chat
+                  </div>
                 ) : (
                   <div className="space-y-4">
                     {stages.map((stage: PipelineStageType) => (
@@ -75,7 +141,15 @@ export default function Home() {
                 </div>
               )}
               
-              {selectedStage ? (
+              {!selectedChatId ? (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  Select or create a chat to begin
+                </div>
+              ) : !selectedStage ? (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  Select a pipeline stage to view the conversation
+                </div>
+              ) : (
                 <>
                   {selectedStage.status === 'waitingForApproval' && (
                     <div className="p-4 border-b">
@@ -88,10 +162,6 @@ export default function Home() {
                     onTechSpecLoading={setTechSpecLoading}
                   />
                 </>
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-500">
-                  Select a pipeline stage to view the conversation
-                </div>
               )}
             </div>
           </div>
