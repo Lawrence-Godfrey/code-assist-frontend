@@ -86,6 +86,9 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
       
       console.log("pipelineResult", pipelineResult);
 
+      // Update approval needed state
+      setApprovalNeeded(!!pipelineResult.approval_needed);
+
       // Save the assistant's response
       await apiRequest("POST", `/api/stages/${stageId}/messages`, {
         role: pipelineResult.response.role,
@@ -108,6 +111,9 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
         return newState;
       });
       
+      // Reset approval state when sending new message
+      setApprovalNeeded(false);
+      
       // Optimistically update with user message
       await queryClient.cancelQueries({ queryKey: [`/api/stages/${stageId}/messages`] as const });
       
@@ -129,6 +135,7 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
         variant: "destructive",
       });
       setPendingAgentResponses([]);
+      setApprovalNeeded(false);
       
       // Revert to previous messages on error
       queryClient.setQueryData(
@@ -143,6 +150,7 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
   });
 
   const [pendingAgentResponses, setPendingAgentResponses] = useState<number[]>([]);
+  const [approvalNeeded, setApprovalNeeded] = useState(false);
 
   const stageIdRef = useRef(stageId);
 
@@ -170,6 +178,11 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
         if (data.type === 'messages' && data.stageId === stageIdRef.current) {
           console.log("Processing messages for stage:", stageIdRef.current);
           
+          // Update approval status if present in the message
+          if ('approval_needed' in data) {
+            setApprovalNeeded(!!data.approval_needed);
+          }
+
           // Check for thinking message first
           const hasThinkingMessage = data.messages.some((msg: { type?: string; content?: string }) => 
             msg.type === 'thinking' || 
@@ -239,12 +252,7 @@ export function ChatInterface({ stageId, stageName, onTechSpecLoading }: ChatInt
   };
 
   const shouldShowApprovalButtons = () => {
-    if (!messages.length) return false;
-    const lastMessage = messages[messages.length - 1];
-    return (
-      lastMessage.role === "agent" && 
-      lastMessage.content.includes("please click the \"Approve\" button")
-    );
+    return approvalNeeded;
   };
 
   console.log("Rendering with pending responses:", pendingAgentResponses);

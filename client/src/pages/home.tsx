@@ -4,9 +4,11 @@ import { PipelineStage } from "@/components/pipeline-stage";
 import { ChatInterface } from "@/components/chat-interface";
 import { ApprovalButtons } from "@/components/approval-buttons";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { ChatList } from "@/components/chat-list";
 import type { PipelineStage as PipelineStageType } from "@shared/schema";
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, MessageSquarePlus } from "lucide-react";
 
 export default function Home() {
   const { selectedStageId, setSelectedStageId } = useStore();
@@ -21,28 +23,44 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto py-8">
-        <h1 className="text-3xl font-bold mb-8">LLM Agent Pipeline</h1>
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold">Code Assistant</h1>
+          <Button className="flex items-center gap-2" onClick={() => {}}>
+            <MessageSquarePlus className="w-4 h-4" />
+            New Chat
+          </Button>
+        </div>
 
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-4 gap-6">
+          {/* Chat List Sidebar */}
+          <div className="col-span-1">
+            <div className="bg-white rounded-lg shadow-sm p-4">
+              <h2 className="text-xl font-semibold mb-4">Chats</h2>
+              <ChatList />
+            </div>
+          </div>
+
           {/* Pipeline Stages */}
           <div className="col-span-1">
-            <h2 className="text-xl font-semibold mb-4">Pipeline Progress</h2>
-            <ScrollArea className="h-[calc(100vh-12rem)]">
-              {isLoading ? (
-                <div className="text-center p-4">Loading stages...</div>
-              ) : (
-                <div className="space-y-4 pr-4">
-                  {stages.map((stage: PipelineStageType) => (
-                    <PipelineStage
-                      key={stage.id}
-                      stage={stage}
-                      isSelected={stage.id === selectedStageId}
-                      onClick={() => setSelectedStageId(stage.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </ScrollArea>
+            <div className="bg-white rounded-lg shadow-sm p-4">
+              <h2 className="text-xl font-semibold mb-4">Pipeline Progress</h2>
+              <ScrollArea className="h-[calc(100vh-16rem)]">
+                {isLoading ? (
+                  <div className="text-center p-4">Loading stages...</div>
+                ) : (
+                  <div className="space-y-4">
+                    {stages.map((stage: PipelineStageType) => (
+                      <PipelineStage
+                        key={stage.id}
+                        stage={stage}
+                        isSelected={stage.id === selectedStageId}
+                        onClick={() => setSelectedStageId(stage.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </div>
           </div>
 
           {/* Chat Interface */}
