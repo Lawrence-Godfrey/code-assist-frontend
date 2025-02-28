@@ -20,9 +20,14 @@ interface ChatInterfaceProps {
   stageName: string;
   isPendingChat?: boolean;
   onTechSpecLoading?: (isLoading: boolean) => void;
+  testConfig?: {
+    autoTest?: boolean;
+    testMessages?: {role: string, content: string}[];
+    testResponses?: {role: string, content: string, approvalNeeded?: boolean}[];
+  };
 }
 
-export function ChatInterface({ stageId, stageName, isPendingChat = false, onTechSpecLoading }: ChatInterfaceProps) {
+export function ChatInterface({ stageId, stageName, isPendingChat = false, onTechSpecLoading, testConfig }: ChatInterfaceProps) {
   const messageListRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   
@@ -46,18 +51,29 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
   const [pendingUserMessage, setPendingUserMessage] = useState<Partial<Message> | null>(null);
   const [approvalNeeded, setApprovalNeeded] = useState(false);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
+  
+  // Determine if we're in test mode
+  const isTestMode = !!testConfig?.autoTest;
 
   // Use our custom hook to get messages (only if not in pending chat mode)
   const { 
     messages = [], 
     isLoading,
     sendMessage: pipelineSendMessage, 
-    isSending: pipelineIsSending 
-  } = usePipeline(isPendingChat ? null : stageId);
+    isSending: pipelineIsSending,
+    approvalNeeded: hookApprovalNeeded
+  } = usePipeline(isPendingChat ? null : stageId, testConfig);
   
   // Combined loading state
   const isPending = pipelineIsSending || isCreatingChat;
   
+  // Update local approval state when hook's approval state changes
+  useEffect(() => {
+    if (hookApprovalNeeded) {
+      setApprovalNeeded(true);
+    }
+  }, [hookApprovalNeeded]);
+
   // Function to determine if approval buttons should be shown
   const shouldShowApprovalButtons = () => {
     return approvalNeeded && !isPendingChat && !isPending;
@@ -82,6 +98,13 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
     
     try {
       console.log("Sending message:", data.content);
+      
+      // In test mode, don't actually send messages - our hook handles them
+      if (isTestMode) {
+        // Just reset the form
+        reset();
+        return;
+      }
       
       // Add the user message to local state for pending chats
       if (isPendingChat) {
@@ -294,17 +317,22 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
           <Textarea
             {...register("content")}
             ref={register("content").ref}
-            placeholder={isPending ? "Please wait..." : "Type your message..."}
+            placeholder={isPending ? "Please wait..." : isTestMode ? "Testing in progress..." : "Type your message..."}
             className="flex-1"
-            disabled={isPending}
+            disabled={isPending || isTestMode}
             onKeyDown={handleKeyDown}
           />
-          <Button type="submit" disabled={isPending}>
+          <Button type="submit" disabled={isPending || isTestMode}>
             <Send className="h-4 w-4" />
           </Button>
         </div>
         {errors.content && (
           <p className="text-sm text-red-500 mt-1">{errors.content.message}</p>
+        )}
+        {isTestMode && (
+          <p className="text-xs text-muted-foreground mt-2">
+            ⚡ Automated test running - input disabled
+          </p>
         )}
       </form>
 

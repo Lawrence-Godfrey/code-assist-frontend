@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { ChatList } from "@/components/chat-list";
 import { Loader2, ChevronRight, ChevronLeft } from "lucide-react";
+import { Link } from "wouter";
 import type { PipelineStage as PipelineStageType } from "@/types/schema";
 
 // Define default stages that match backend creation
@@ -84,8 +85,13 @@ export default function Home() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="h-16 px-6 flex items-center border-b border-gray-200 bg-white">
+        <header className="h-16 px-6 flex items-center justify-between border-b border-gray-200 bg-white">
           <h1 className="text-xl font-bold">Code Assistant</h1>
+          <div className="flex items-center gap-4">
+            <Link href="/test">
+              <a className="text-sm font-medium text-primary hover:underline">Test Runner</a>
+            </Link>
+          </div>
         </header>
         
         {/* Main content area */}

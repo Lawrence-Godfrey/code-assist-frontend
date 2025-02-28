@@ -2,10 +2,19 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { queryClient } from '@/lib/queryClient';
 import { pipelineService } from '@/services/pipeline-service';
 import { Message, PipelineStage } from '@/types/schema';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
-export function usePipeline(stageId: number | null) {
+export function usePipeline(stageId: number | null, options?: { 
+  autoTest?: boolean;
+  testMessages?: {role: string, content: string}[];
+  testResponses?: {role: string, content: string, approvalNeeded?: boolean}[];
+}) {
   const [approvalNeeded, setApprovalNeeded] = useState(false);
+  const [autoTestIndex, setAutoTestIndex] = useState(0);
+  const [isAutoTesting, setIsAutoTesting] = useState(false);
+  
+  // Use a ref to keep track of mounted state
+  const isMounted = useRef(true);
   
   // Get messages for a stage
   const {
@@ -107,6 +116,109 @@ export function usePipeline(stageId: number | null) {
     },
   });
 
+  // Handle cleanup
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  // Auto testing functionality
+  useEffect(() => {
+    if (!options?.autoTest || !options?.testMessages || !options?.testResponses) {
+      return;
+    }
+
+    if (isAutoTesting || autoTestIndex >= (options.testMessages?.length || 0)) {
+      return;
+    }
+
+    // Automatically send the next test message
+    const nextMessage = options.testMessages[autoTestIndex];
+    const simulatedResponse = options.testResponses[autoTestIndex];
+    
+    // Skip if we don't have a message or response for this index
+    if (!nextMessage || !simulatedResponse) {
+      return;
+    }
+
+    const runTest = async () => {
+      setIsAutoTesting(true);
+      
+      try {
+        // Simulate sending a message and getting a response
+        // This is a mock that doesn't actually call the API
+        console.log(`[Auto Test] Sending message: ${nextMessage.content}`);
+        
+        // Add a small delay to make it look realistic
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        if (!isMounted.current) return;
+        
+        // Add user message to message history
+        const userMessage: Message = {
+          id: `auto-user-${Date.now()}`,
+          content: nextMessage.content,
+          role: nextMessage.role,
+          createdAt: new Date().toISOString(),
+          stageId: stageId || 0
+        };
+        
+        // Add to message list
+        queryClient.setQueryData(
+          [`/api/stages/${stageId}/messages`], 
+          (old: Message[] = []) => [...old, userMessage]
+        );
+        
+        // Add a small delay to make it look realistic
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        if (!isMounted.current) return;
+        
+        // Add agent response
+        const agentMessage: Message = {
+          id: `auto-agent-${Date.now()}`,
+          content: simulatedResponse.content,
+          role: simulatedResponse.role,
+          createdAt: new Date().toISOString(),
+          stageId: stageId || 0
+        };
+        
+        // Add to message list
+        queryClient.setQueryData(
+          [`/api/stages/${stageId}/messages`], 
+          (old: Message[] = []) => [...old, agentMessage]
+        );
+        
+        // Set approval state if needed
+        if (simulatedResponse.approvalNeeded) {
+          setApprovalNeeded(true);
+        }
+        
+        // Move to next message
+        if (isMounted.current) {
+          setAutoTestIndex(prev => prev + 1);
+        }
+      } finally {
+        if (isMounted.current) {
+          setIsAutoTesting(false);
+        }
+      }
+    };
+    
+    // Run the test with a small delay to make it feel more natural
+    const timer = setTimeout(() => {
+      runTest();
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [autoTestIndex, isAutoTesting, options?.autoTest, options?.testMessages, options?.testResponses, stageId]);
+
+  // Determine if testing is complete
+  const isTestingComplete = options?.autoTest && 
+    options?.testMessages && 
+    autoTestIndex >= (options.testMessages?.length || 0);
+
   return {
     messages,
     isLoading,
@@ -118,5 +230,9 @@ export function usePipeline(stageId: number | null) {
     rejectStage,
     isRejecting,
     approvalNeeded,
+    // Auto testing properties
+    isAutoTesting,
+    autoTestIndex,
+    isTestingComplete,
   };
 }
