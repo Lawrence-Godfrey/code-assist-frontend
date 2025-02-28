@@ -11,7 +11,6 @@ import { Send, User, Bot, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { ApprovalButtons } from "@/components/approval-buttons";
-import { getWebSocketUrl } from "@/lib/websocket";
 import { useStore } from "@/lib/store";
 
 interface ChatInterfaceProps {
@@ -39,11 +38,12 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
   // Only fetch messages if not in pending chat mode
   const { data: messages = [], isLoading } = useQuery<Message[]>({
     queryKey: [`/api/stages/${stageId}/messages`] as const,
-    enabled: !isPendingChat, // Do not fetch messages for pending chats
+    enabled: !isPendingChat && stageId > 0, // Do not fetch messages for pending chats
   });
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [pendingAgentResponses, setPendingAgentResponses] = useState<number[]>([]);
+  const [pendingUserMessage, setPendingUserMessage] = useState<Partial<Message> | null>(null);
   const [approvalNeeded, setApprovalNeeded] = useState(false);
 
   // Function to create a new chat directly (not using React Query's mutate)
@@ -71,9 +71,11 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
           const newChat = await createNewChat();
           chatId = newChat.id;
           
-          // Set the selected chat ID and update pending state
+          // Set the selected chat ID
           setSelectedChatId(chatId);
-          setPendingChat(false);
+          
+          // Log that chat was created but DON'T update pending state yet
+          console.log("Chat created");
           
           // Get the first stage ID from the new chat
           if (newChat.stages && newChat.stages.length > 0) {
@@ -137,15 +139,27 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
 
     onMutate: async (newMessage) => {
       console.log("onMutate called, adding pending response");
+      
+      // Add the user message immediately to local state if in pending chat mode
+      if (isPendingChat) {
+        setPendingUserMessage({
+          id: `pending-${Date.now()}`,
+          content: newMessage.content,
+          role: "user",
+          createdAt: new Date().toISOString(),
+        });
+      }
+      
+      // Add pending agent response indicator
       setPendingAgentResponses(prev => {
         const newState = [...prev, Date.now()];
-        console.log("New pending responses state:", newState);
+        console.log(`Adding pending response. Old count: ${prev.length}, New count: ${newState.length}`);
         return newState;
       });
       
       // Reset approval state when sending new message
       setApprovalNeeded(false);
-      
+
       if (!isPendingChat) {
         // Optimistically update with user message (only for existing chats)
         await queryClient.cancelQueries({ queryKey: [`/api/stages/${stageId}/messages`] as const });
@@ -163,13 +177,16 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
       
       return { previousMessages: isPendingChat ? [] : queryClient.getQueryData([`/api/stages/${stageId}/messages`]) };
     },
+
     onError: (error, _variables, context) => {
       toast({
         title: "Error sending message",
         description: (error as Error).message,
         variant: "destructive",
       });
+      console.log(`Error sending message: ${error}`);
       setPendingAgentResponses([]);
+      setPendingUserMessage(null);
       setApprovalNeeded(false);
       
       // Revert to previous messages on error
@@ -180,9 +197,9 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
         );
       }
     },
+
     onSuccess: (result) => {
-      // Clear pending responses when we get the agent's response
-      setPendingAgentResponses([]);
+      console.log("Message sent successfully");
       
       // If the stage ID changed (due to new chat creation), update queries
       if (result.actualStageId !== stageId) {
@@ -190,6 +207,15 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
           queryKey: [`/api/stages/${result.actualStageId}/messages`] 
         });
       }
+      
+      // Update pending chat state here after everything is complete
+      if (isPendingChat) {
+        setPendingChat(false);
+      }
+      
+      // Clear pending user message and responses after successful response
+      setPendingUserMessage(null);
+      setPendingAgentResponses([]);
     },
   });
 
@@ -197,89 +223,15 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
 
   useEffect(() => {
     stageIdRef.current = stageId;
-    
-    if (isPendingChat) return; // Don't set up WebSocket for pending chats
-    
-    const wsUrl = getWebSocketUrl('/ws');
-    console.log("Connecting to WebSocket:", wsUrl);
-    
-    const socket = new WebSocket(wsUrl);
-
-    socket.onopen = () => {
-      console.log("WebSocket connected successfully");
-    };
-
-    socket.onclose = () => {
-      console.log("WebSocket connection closed");
-    };
-
-    socket.onmessage = (event) => {
-      console.log("Raw WebSocket message:", event.data);
-      try {
-        const data = JSON.parse(event.data);
-        console.log("Parsed WebSocket data:", data);
-
-        if (data.type === 'messages' && data.stageId === stageIdRef.current) {
-          console.log("Processing messages for stage:", stageIdRef.current);
-          
-          // Update approval status if present in the message
-          if ('approval_needed' in data) {
-            setApprovalNeeded(!!data.approval_needed);
-          }
-
-          // Check for thinking message first
-          const hasThinkingMessage = data.messages.some((msg: { type?: string; content?: string }) => 
-            msg.type === 'thinking' || 
-            (msg.content && typeof msg.content === 'string' && 
-             msg.content.includes("Building Technical Specification"))
-          );
-
-          if (hasThinkingMessage) {
-            console.log("Found thinking message - setting loading to true");
-            onTechSpecLoading?.(true);
-            return; // Don't process further
-          }
-
-          // Only process regular messages if no thinking message
-          const hasAgentResponse = data.messages.some((msg: { role?: string; type?: string }) => 
-            msg.role === 'agent' && 
-            msg.type !== 'thinking'
-          );
-
-          if (hasAgentResponse) {
-            console.log("Found regular agent response - clearing loading state");
-            onTechSpecLoading?.(false);
-            setPendingAgentResponses(prev => prev.slice(1));
-            setTimeout(() => textareaRef.current?.focus(), 100);
-          }
-
-          queryClient.invalidateQueries({ 
-            queryKey: [`/api/stages/${stageIdRef.current}/messages`] 
-          });
-        }
-      } catch (error) {
-        console.error("Error processing WebSocket message:", error);
-      }
-    };
-
-    socket.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-
-    return () => {
-      console.log("Cleaning up WebSocket connection");
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.close();
-      }
-    };
-  }, [stageId, onTechSpecLoading, isPendingChat]);
+  }, [stageId]);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
+    console.log(`Messages changed: ${messages.length}, Pending responses: ${pendingAgentResponses.length}, isPendingChat: ${isPendingChat}`);
     if (messageListRef.current) {
       messageListRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [messages.length, pendingAgentResponses.length]);
+  }, [messages.length, pendingAgentResponses.length, isPendingChat]);
 
   const onSubmit = handleSubmit((data) => {
     if (data.content.trim()) {
@@ -302,8 +254,15 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const isPending = isSendingMessage || isCreatingChat;
 
-  // For pending chats, show an empty state
-  const displayMessages = isPendingChat ? [] : messages;
+  // For pending chats, start with an empty array until we have messages
+  // but still ensure we show any messages that appear after a pending chat becomes active
+  // We need to combine real messages with any pending user message
+  const baseMessages = isPendingChat && messages.length === 0 ? [] : messages;
+  
+  // Create a combined messages array that includes the pending user message if it exists
+  const displayMessages = pendingUserMessage 
+    ? [...baseMessages, pendingUserMessage as Message]
+    : baseMessages;
 
   return (
     <div className="flex flex-col h-full">
@@ -319,7 +278,7 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
       <ScrollArea className="flex-1 p-4">
         {isLoading && !isPendingChat ? (
           <div className="text-center p-4">Loading conversation history...</div>
-        ) : displayMessages.length === 0 ? (
+        ) : displayMessages.length === 0 && pendingAgentResponses.length === 0 ? (
           <div className="text-center p-4 text-gray-500">
             {isPendingChat 
               ? "Type a message below to start a new conversation"
@@ -358,21 +317,19 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
                 )}
               </div>
             ))}
-            {pendingAgentResponses.map((id, index) => (
-              <div key={id} className="flex items-center gap-3 p-4 animate-fade-in">
+            {pendingAgentResponses.length > 0 && (
+              <div key={pendingAgentResponses[0]} className="flex items-center gap-3 p-4 animate-fade-in">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <Bot className="h-4 w-4 text-primary" />
                 </div>
                 <div className="flex items-center gap-2 px-4 py-2 bg-muted rounded-lg">
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                   <span className="text-muted-foreground text-sm">
-                    {index === 0 ? (
-                      isPendingChat ? "Creating chat and processing response..." : "Agent is thinking..."
-                    ) : "Queueing response..."}
+                    {isPendingChat && isCreatingChat ? "Creating chat and processing response..." : "Agent is thinking..."}
                   </span>
                 </div>
               </div>
-            ))}
+            )}
           </div>
         )}
       </ScrollArea>

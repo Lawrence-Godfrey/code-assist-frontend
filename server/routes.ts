@@ -1,10 +1,7 @@
 import type { Express } from "express";
 import { Request, Response } from "express";
 import { createServer } from "http";
-import { WebSocketServer, WebSocket } from "ws";
 import { log } from "./vite";
-
-const clients = new Set<WebSocket>();
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
@@ -35,31 +32,6 @@ async function proxyRequest(req: Request, res: Response, method: string, path: s
 export function registerRoutes(app: Express) {
   log("Starting to register routes...", "startup");
   const server = createServer(app);
-
-  // Setup WebSocket server
-  const wss = new WebSocketServer({ server, path: '/ws' });
-
-  wss.on('connection', (ws) => {
-    clients.add(ws);
-
-    ws.on('close', () => {
-      clients.delete(ws);
-    });
-  });
-
-  // Broadcast messages to all connected clients
-  function broadcastMessages(stageId: number, messages: any[]) {
-    const payload = JSON.stringify({
-      type: 'messages',
-      stageId,
-      messages: messages[0]?.type === 'messages' ? messages[0].messages : messages
-    });
-    clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
-    });
-  }
 
   // Proxy all /api requests to the backend
   app.all("/api/*", (req: Request, res: Response) => {
