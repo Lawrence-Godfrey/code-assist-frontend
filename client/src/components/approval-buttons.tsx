@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ThumbsUp, ThumbsDown } from "lucide-react";
 import { queryClient } from "@/lib/queryClient";
-import { apiRequest } from "@/lib/queryClient";
+import { api } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 import { useStore } from "@/lib/store";
 
@@ -17,7 +17,7 @@ export function ApprovalButtons({ stageId, onTechSpecLoading }: ApprovalButtonsP
 
   const { mutate: updateStage, isPending } = useMutation({
     mutationFn: async (approved: boolean) => {
-      return apiRequest("PATCH", `/api/stages/${stageId}`, {
+      return api.patch(`/api/stages/${stageId}`, {
         status: approved ? "complete" : "inProgress",
         isComplete: approved,
       });

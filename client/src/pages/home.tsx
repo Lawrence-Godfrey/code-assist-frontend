@@ -1,62 +1,51 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { useStore } from "@/lib/store";
+import { useChat } from "@/hooks/use-chat";
 import { PipelineStage } from "@/components/pipeline-stage";
 import { ChatInterface } from "@/components/chat-interface";
 import { ApprovalButtons } from "@/components/approval-buttons";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { PipelineStage as PipelineStageType } from "@shared/schema";
-import { useState } from "react";
-import { Loader2, ChevronRight, ChevronLeft, MessageSquare } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import { ChatList } from "@/components/chat-list";
+import { Loader2, ChevronRight, ChevronLeft } from "lucide-react";
+import type { PipelineStage as PipelineStageType } from "@/types/schema";
+
+// Define default stages that match backend creation
+const DEFAULT_STAGES: PipelineStageType[] = [
+  { id: 1, name: "Requirements Gathering", description: "Clarify and document project requirements", status: "not_started" },
+  { id: 2, name: "Technical Specification", description: "Convert requirements into technical specifications", status: "not_started" },
+  { id: 3, name: "Implementation", description: "Generate and implement code changes", status: "not_started" },
+  { id: 4, name: "Code Review", description: "Review and validate code changes", status: "not_started" }
+];
 
 export default function Home() {
-  const { 
-    selectedChatId, 
-    selectedStageId, 
-    pendingChat,
-    setSelectedChatId, 
-    setSelectedStageId 
-  } = useStore();
+  // App state from zustand store
+  const selectedChatId = useStore.selectedChatId();
+  const selectedStageId = useStore.selectedStageId();
+  const pendingChat = useStore.pendingChat();
+  const setSelectedStageId = useStore.setSelectedStageId();
+  
+  // Local UI state
   const [techSpecLoading, setTechSpecLoading] = useState(false);
   const [chatPanelCollapsed, setChatPanelCollapsed] = useState(false);
 
-  // Fetch stages for the selected chat (only if not in pending chat mode)
-  const { 
-    data: stages = [], 
-    isLoading: stagesLoading 
-  } = useQuery<PipelineStageType[]>({
-    queryKey: ["/api/chats", selectedChatId, "stages"],
-    queryFn: async () => {
-      if (!selectedChatId) return [];
-      const response = await apiRequest('GET', `/api/chats/${selectedChatId}/stages`);
-      return await response.json();
-    },
-    enabled: !!selectedChatId && !pendingChat, // Only run this query if we have a selected chat and not in pending state
-  });
+  // Get chat and stages data using our custom hook
+  const { stages, isLoading: stagesLoading } = useChat(selectedChatId);
 
-  // For pending chat, we'll use default stage names that match what the backend would create
-  const defaultStages = [
-    { id: 1, name: "Requirements Gathering", description: "Clarify and document project requirements", status: "not_started" },
-    { id: 2, name: "Technical Specification", description: "Convert requirements into technical specifications", status: "not_started" },
-    { id: 3, name: "Implementation", description: "Generate and implement code changes", status: "not_started" },
-    { id: 4, name: "Code Review", description: "Review and validate code changes", status: "not_started" }
-  ];
-
-  // Use default stages if in pending chat mode, otherwise use fetched stages
-  const displayStages = pendingChat ? defaultStages : stages;
+  // Determine which stages to display based on app state
+  const displayStages = pendingChat ? DEFAULT_STAGES : stages;
   const displaySelectedStageId = pendingChat ? 1 : selectedStageId; // Default to first stage in pending mode
   const displaySelectedStage = displayStages.find(stage => stage.id === displaySelectedStageId);
   
+  // Handler for toggling the chat sidebar
   const toggleChatPanel = () => {
     setChatPanelCollapsed(!chatPanelCollapsed);
   };
 
   return (
     <div className="flex h-screen bg-gray-50">
-      {/* Chat Sidebar - flush with left edge */}
-      <div 
+      {/* Chat Sidebar */}
+      <aside 
         className={cn(
           "h-full bg-white border-r border-gray-200 transition-all duration-300 ease-in-out relative flex flex-col z-10",
           chatPanelCollapsed ? "w-0" : "w-72"
@@ -90,20 +79,20 @@ export default function Home() {
             <ChevronLeft className="w-5 h-5 text-gray-500" />
           )}
         </button>
-      </div>
+      </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="h-16 px-6 flex items-center border-b border-gray-200 bg-white">
           <h1 className="text-xl font-bold">Code Assistant</h1>
         </header>
         
-        {/* Main grid area */}
+        {/* Main content area */}
         <div className="flex-1 overflow-auto p-6">
           <div className="grid grid-cols-3 gap-6 max-w-7xl mx-auto">
-            {/* Pipeline Stages */}
-            <div className="col-span-1">
+            {/* Pipeline Stages Panel */}
+            <section className="col-span-1">
               <div className="bg-white rounded-lg shadow-sm p-4 h-full">
                 <h2 className="text-xl font-semibold mb-4">Pipeline Progress</h2>
                 <ScrollArea className="h-[calc(100vh-12rem)]">
@@ -119,7 +108,7 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {displayStages.map((stage: PipelineStageType) => (
+                      {displayStages.map((stage) => (
                         <PipelineStage
                           key={stage.id}
                           stage={stage}
@@ -131,10 +120,10 @@ export default function Home() {
                   )}
                 </ScrollArea>
               </div>
-            </div>
+            </section>
 
-            {/* Chat Interface */}
-            <div className="col-span-2">
+            {/* Chat Interface Panel */}
+            <section className="col-span-2">
               <div className="bg-white rounded-lg shadow-sm h-[calc(100vh-12rem)] flex flex-col relative">
                 {techSpecLoading && (
                   <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-10">
@@ -169,10 +158,10 @@ export default function Home() {
                   </>
                 )}
               </div>
-            </div>
+            </section>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

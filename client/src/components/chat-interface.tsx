@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertMessageSchema, type Message } from "@shared/schema";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { insertMessageSchema } from "@/types/schema";
+import { type Message } from "@/types/schema";
 import { Send, User, Bot, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { ApprovalButtons } from "@/components/approval-buttons";
 import { useStore } from "@/lib/store";
+import { usePipeline } from "@/hooks/use-pipeline";
+import { queryClient } from "@/lib/queryClient";
+import { chatService, pipelineService } from "@/services";
 
 interface ChatInterfaceProps {
   stageId: number;
@@ -21,11 +23,15 @@ interface ChatInterfaceProps {
 }
 
 export function ChatInterface({ stageId, stageName, isPendingChat = false, onTechSpecLoading }: ChatInterfaceProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  const { setSelectedChatId, setSelectedStageId, setPendingChat } = useStore();
   
+  // Get global state from store using our improved selectors
+  const setSelectedChatId = useStore.setSelectedChatId();
+  const setSelectedStageId = useStore.setSelectedStageId();
+  const setPendingChat = useStore.setPendingChat();
+  
+  // Form handling
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     resolver: zodResolver(insertMessageSchema),
     defaultValues: {
@@ -35,211 +41,166 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
     }
   });
 
-  // Only fetch messages if not in pending chat mode
-  const { data: messages = [], isLoading } = useQuery<Message[]>({
-    queryKey: [`/api/stages/${stageId}/messages`] as const,
-    enabled: !isPendingChat && stageId > 0, // Do not fetch messages for pending chats
-  });
-
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Local UI state
   const [pendingAgentResponses, setPendingAgentResponses] = useState<number[]>([]);
   const [pendingUserMessage, setPendingUserMessage] = useState<Partial<Message> | null>(null);
   const [approvalNeeded, setApprovalNeeded] = useState(false);
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
 
-  // Function to create a new chat directly (not using React Query's mutate)
-  const createNewChat = async () => {
-    const response = await apiRequest("POST", "/api/chats", {
-      description: null,
-      create_default_stages: true
-    });
-    return await response.json();
+  // Use our custom hook to get messages (only if not in pending chat mode)
+  const { 
+    messages = [], 
+    isLoading,
+    sendMessage: pipelineSendMessage, 
+    isSending: pipelineIsSending 
+  } = usePipeline(isPendingChat ? null : stageId);
+  
+  // Combined loading state
+  const isPending = pipelineIsSending || isCreatingChat;
+  
+  // Function to determine if approval buttons should be shown
+  const shouldShowApprovalButtons = () => {
+    return approvalNeeded && !isPendingChat && !isPending;
   };
 
-  // Mutation for sending messages
-  const { mutate: sendMessage, isPending: isSendingMessage } = useMutation({
-    mutationFn: async (data: { content: string, chatId?: number }) => {
-      console.log("Sending message to server");
-      
-      let chatId = data.chatId;
-      let actualStageId = stageId;
-      
-      // If this is a pending chat, create the chat first
-      if (isPendingChat) {
-        try {
-          setIsCreatingChat(true);
-          // Create new chat directly
-          const newChat = await createNewChat();
-          chatId = newChat.id;
-          
-          // Set the selected chat ID
-          setSelectedChatId(chatId);
-          
-          // Log that chat was created but DON'T update pending state yet
-          console.log("Chat created");
-          
-          // Get the first stage ID from the new chat
-          if (newChat.stages && newChat.stages.length > 0) {
-            actualStageId = newChat.stages[0].id;
-            setSelectedStageId(actualStageId);
-          }
-          
-          // Invalidate chat list query to refresh it
-          queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
-          setIsCreatingChat(false);
-        } catch (error) {
-          setIsCreatingChat(false);
-          console.error("Error creating chat:", error);
-          throw new Error("Failed to create chat");
-        }
-      }
-      
-      // Now save the user message to the appropriate stage
-      await apiRequest("POST", `/api/stages/${actualStageId}/messages`, {
-        role: "user",
-        content: data.content,
+  // Function to create a new chat 
+  const createNewChat = async () => {
+    try {
+      return await chatService.createChat({
+        description: null,
+        create_default_stages: true
       });
+    } catch (error) {
+      console.error("Error creating chat:", error);
+      throw new Error("Failed to create chat");
+    }
+  };
 
-      // Get updated messages including the newly saved message
-      const allMessages = await apiRequest("GET", `/api/stages/${actualStageId}/messages`);
-      const messageHistory = await allMessages.json();
-
-      console.log("messageHistory", messageHistory);
-
-      // Send to pipeline with message history
-      const pipelineResponse = await apiRequest("POST", "/api/pipeline", {
-        prompt_model_name: "gpt-4",
-        message_history: messageHistory.map((msg: Message) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-      });
-
-      // Print the raw response body
-      const pipelineResult = await pipelineResponse.json();
+  // Handle sending a message
+  const handleSendMessage = async (data: { content: string }) => {
+    if (!data.content.trim()) return;
+    
+    try {
+      console.log("Sending message:", data.content);
       
-      console.log("pipelineResult", pipelineResult);
-
-      // Save the received message to the db
-      await apiRequest("POST", `/api/stages/${actualStageId}/messages`, {
-        role: pipelineResult.response.role,
-        content: pipelineResult.response.content,
-        stageId: actualStageId,
-      });
-
-      // Update approval needed state
-      setApprovalNeeded(!!pipelineResult.approval_needed);
-
-      // Invalidate the messages query to trigger a refresh
-      await queryClient.invalidateQueries({ 
-        queryKey: [`/api/stages/${actualStageId}/messages`] 
-      });
-
-      return { response: pipelineResult.response, actualStageId };
-    },
-
-    onMutate: async (newMessage) => {
-      console.log("onMutate called, adding pending response");
-      
-      // Add the user message immediately to local state if in pending chat mode
+      // Add the user message to local state for pending chats
       if (isPendingChat) {
         setPendingUserMessage({
           id: `pending-${Date.now()}`,
-          content: newMessage.content,
+          content: data.content,
           role: "user",
           createdAt: new Date().toISOString(),
         });
+        
+        // Show pending response indicator
+        setPendingAgentResponses(prev => [...prev, Date.now()]);
+        
+        // Reset approval state
+        setApprovalNeeded(false);
+        
+        // Create new chat if in pending mode
+        setIsCreatingChat(true);
+        const newChat = await createNewChat();
+        const chatId = newChat.id;
+        
+        // Update store state
+        setSelectedChatId(chatId);
+        
+        // Get the first stage ID
+        let actualStageId = stageId;
+        if (newChat.stages && newChat.stages.length > 0) {
+          actualStageId = newChat.stages[0].id;
+          setSelectedStageId(actualStageId);
+        }
+        
+        // Process the message
+        const newMessageContent = data.content;
+        
+        // Send user message
+        await pipelineService.sendMessage(actualStageId, {
+          role: "user",
+          content: newMessageContent
+        });
+        
+        // Get message history
+        const messageHistory = await pipelineService.getStageMessages(actualStageId);
+        
+        // Process through pipeline
+        const response = await pipelineService.processPipeline({
+          prompt_model_name: "gpt-4",
+          message_history: messageHistory.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+          }))
+        });
+        
+        // Save agent response
+        await pipelineService.sendMessage(actualStageId, {
+          role: response.response.role,
+          content: response.response.content
+        });
+        
+        // Update state
+        setApprovalNeeded(!!response.approval_needed);
+        setPendingChat(false);
+        setPendingUserMessage(null);
+        setPendingAgentResponses([]);
+        setIsCreatingChat(false);
+        
+        // Refresh data
+        queryClient.invalidateQueries({ queryKey: [`/api/stages/${actualStageId}/messages`] });
+        queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      } else {
+        // For existing chats, add the user message to the local UI immediately
+        setPendingUserMessage({
+          id: `pending-${Date.now()}`,
+          content: data.content,
+          role: "user",
+          createdAt: new Date().toISOString(),
+        });
+        
+        // Use our pipeline hook to send the message
+        pipelineSendMessage({ content: data.content });
+        
+        // Show pending response
+        setPendingAgentResponses(prev => [...prev, Date.now()]);
       }
       
-      // Add pending agent response indicator
-      setPendingAgentResponses(prev => {
-        const newState = [...prev, Date.now()];
-        console.log(`Adding pending response. Old count: ${prev.length}, New count: ${newState.length}`);
-        return newState;
-      });
-      
-      // Reset approval state when sending new message
-      setApprovalNeeded(false);
-
-      if (!isPendingChat) {
-        // Optimistically update with user message (only for existing chats)
-        await queryClient.cancelQueries({ queryKey: [`/api/stages/${stageId}/messages`] as const });
-        
-        const previousMessages = queryClient.getQueryData<Message[]>([`/api/stages/${stageId}/messages`] as const) || [];
-        
-        // For optimistic update, we only show the content - the real message will replace this on success
-        queryClient.setQueryData([`/api/stages/${stageId}/messages`] as const, [
-          ...previousMessages, 
-          { content: newMessage.content, role: "user" } as Message
-        ]);
-      }
-      
+      // Reset form
       reset();
       
-      return { previousMessages: isPendingChat ? [] : queryClient.getQueryData([`/api/stages/${stageId}/messages`]) };
-    },
-
-    onError: (error, _variables, context) => {
+    } catch (error) {
+      setIsCreatingChat(false);
+      setPendingAgentResponses([]);
+      setPendingUserMessage(null);
+      
       toast({
         title: "Error sending message",
         description: (error as Error).message,
         variant: "destructive",
       });
-      console.log(`Error sending message: ${error}`);
-      setPendingAgentResponses([]);
-      setPendingUserMessage(null);
-      setApprovalNeeded(false);
-      
-      // Revert to previous messages on error
-      if (!isPendingChat && context?.previousMessages) {
-        queryClient.setQueryData(
-          [`/api/stages/${stageId}/messages`],
-          context.previousMessages
-        );
-      }
-    },
+    }
+  };
 
-    onSuccess: (result) => {
-      console.log("Message sent successfully");
-      
-      // If the stage ID changed (due to new chat creation), update queries
-      if (result.actualStageId !== stageId) {
-        queryClient.invalidateQueries({ 
-          queryKey: [`/api/stages/${result.actualStageId}/messages`] 
-        });
-      }
-      
-      // Update pending chat state here after everything is complete
-      if (isPendingChat) {
-        setPendingChat(false);
-      }
-      
-      // Clear pending user message and responses after successful response
-      setPendingUserMessage(null);
-      setPendingAgentResponses([]);
-    },
-  });
-
-  const stageIdRef = useRef(stageId);
-
+  // Clear pending user message when real messages change
   useEffect(() => {
-    stageIdRef.current = stageId;
-  }, [stageId]);
+    if (messages.length > 0 && pendingUserMessage) {
+      setPendingUserMessage(null);
+      setPendingAgentResponses([]);
+    }
+  }, [messages.length]);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
-    console.log(`Messages changed: ${messages.length}, Pending responses: ${pendingAgentResponses.length}, isPendingChat: ${isPendingChat}`);
     if (messageListRef.current) {
       messageListRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
   }, [messages.length, pendingAgentResponses.length, isPendingChat]);
 
-  const onSubmit = handleSubmit((data) => {
-    if (data.content.trim()) {
-      console.log("Sending message:", data);
-      sendMessage(data);
-    }
-  });
+  // Form submission handler
+  const onSubmit = handleSubmit(handleSendMessage);
 
+  // Handle Enter key for submitting
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -247,18 +208,10 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
     }
   };
 
-  const shouldShowApprovalButtons = () => {
-    return approvalNeeded;
-  };
-
-  const [isCreatingChat, setIsCreatingChat] = useState(false);
-  const isPending = isSendingMessage || isCreatingChat;
-
-  // For pending chats, always start with an empty array
-  // We should never show previous chat messages when in pending chat state
+  // For pending chats, always start with empty messages
   const baseMessages = isPendingChat ? [] : messages;
   
-  // Create a combined messages array that includes the pending user message if it exists
+  // Include pending user message if it exists
   const displayMessages = pendingUserMessage 
     ? [...baseMessages, pendingUserMessage as Message]
     : baseMessages;
@@ -324,7 +277,7 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
                 <div className="flex items-center gap-2 px-4 py-2 bg-muted rounded-lg">
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                   <span className="text-muted-foreground text-sm">
-                    {isPendingChat && isCreatingChat ? "Creating chat and processing response..." : "Agent is thinking..."}
+                    Agent is thinking...
                   </span>
                 </div>
               </div>

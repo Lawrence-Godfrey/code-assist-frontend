@@ -1,28 +1,44 @@
 import { create } from 'zustand';
-import type { PipelineStage } from '@shared/schema';
+import { createSelectors } from './create-selectors';
+import type { Chat, PipelineStage } from '@/types/schema';
 
-interface Chat {
-  id: number;
-  created_at: string;
-  stages?: any[];
-}
+// Split the store into separate slices for better organization
 
-interface AppState {
+interface ChatState {
   selectedChatId: number | null;
-  selectedStageId: number | null;
-  pendingChat: boolean; // Track if we're in a pending chat state
+  pendingChat: boolean;
   setSelectedChatId: (id: number | null) => void;
-  setSelectedStageId: (id: number | null) => void;
   setPendingChat: (pending: boolean) => void;
-  resetChat: () => void; // Helper to reset both chat ID and stage ID
 }
 
-export const useStore = create<AppState>((set) => ({
+interface StageState {
+  selectedStageId: number | null;
+  setSelectedStageId: (id: number | null) => void;
+}
+
+interface AppState extends ChatState, StageState {
+  resetState: () => void; // Helper to reset the entire state
+}
+
+// Create a store with slices
+const useStoreBase = create<AppState>((set) => ({
+  // Chat slice
   selectedChatId: null,
-  selectedStageId: null,
   pendingChat: false,
   setSelectedChatId: (id: number | null) => set({ selectedChatId: id }),
-  setSelectedStageId: (id: number | null) => set({ selectedStageId: id }),
   setPendingChat: (pending: boolean) => set({ pendingChat: pending }),
-  resetChat: () => set({ selectedChatId: null, selectedStageId: null, pendingChat: false }),
+  
+  // Stage slice
+  selectedStageId: null,
+  setSelectedStageId: (id: number | null) => set({ selectedStageId: id }),
+  
+  // App-wide operations
+  resetState: () => set({ 
+    selectedChatId: null, 
+    selectedStageId: null, 
+    pendingChat: false 
+  }),
 }));
+
+// Export the store with selectors for more convenient usage
+export const useStore = createSelectors(useStoreBase);
