@@ -1,6 +1,6 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { MessageSquare, MessageSquarePlus, Loader2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { MessageSquare, MessageSquarePlus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { apiRequest } from '@/lib/queryClient';
 import { useStore } from '@/lib/store';
@@ -24,8 +24,11 @@ export const ChatList: React.FC = () => {
     setSelectedChatId, 
     setSelectedStageId, 
     pendingChat,
-    setPendingChat
+    setPendingChat,
+    resetChat
   } = useStore();
+  
+  const queryClient = useQueryClient();
   
   const { data: chats = [], isLoading, error } = useQuery<Chat[]>({
     queryKey: ['/api/chats'] as const,
@@ -40,6 +43,27 @@ export const ChatList: React.FC = () => {
     setPendingChat(true);
     setSelectedChatId(null);
     setSelectedStageId(null);
+  };
+  
+  const handleDeleteChat = async (chatId: number, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent chat selection when clicking delete
+    
+    if (confirm('Are you sure you want to delete this chat?')) {
+      try {
+        await apiRequest('DELETE', `/api/chats/${chatId}`);
+        
+        // If the deleted chat was selected, reset selection
+        if (selectedChatId === chatId) {
+          resetChat();
+        }
+        
+        // Refresh chat list
+        queryClient.invalidateQueries({ queryKey: ['/api/chats'] });
+      } catch (error) {
+        console.error('Failed to delete chat:', error);
+        alert('Failed to delete the chat. Please try again.');
+      }
+    }
   };
 
   if (isLoading) {
@@ -87,37 +111,49 @@ export const ChatList: React.FC = () => {
             {[...chats]
               .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
               .map((chat) => (
-                <button
+                <div
                   key={chat.id}
                   className={cn(
-                    'w-full py-2 px-3 flex items-center gap-3 transition-colors',
+                    'w-full py-2 px-3 flex items-center transition-colors',
                     'hover:bg-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-200',
                     'text-left rounded-md',
+                    'group',
                     (selectedChatId === chat.id && !pendingChat) ? 'bg-blue-100 text-blue-700' : 'text-gray-700'
                   )}
-                  onClick={() => {
-                    setPendingChat(false);
-                    setSelectedChatId(chat.id);
-                    // Select the first stage if available
-                    if (chat.stages && chat.stages.length > 0) {
-                      setSelectedStageId(chat.stages[0].id);
-                    } else {
-                      // Clear selected stage if no stages are available
-                      setSelectedStageId(null);
-                    }
-                  }}
                 >
-                  <MessageSquare className={cn(
-                    "w-4 h-4 flex-shrink-0",
-                    (selectedChatId === chat.id && !pendingChat) ? 'text-blue-600' : 'text-gray-500'
-                  )} />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate">Chat {chat.id}</div>
-                    <div className="text-xs text-gray-500 truncate">
-                      {new Date(chat.created_at).toLocaleDateString()}
+                  <button
+                    className="flex-1 flex items-center gap-2 justify-start text-left mr-2"
+                    onClick={() => {
+                      setPendingChat(false);
+                      setSelectedChatId(chat.id);
+                      // Select the first stage if available
+                      if (chat.stages && chat.stages.length > 0) {
+                        setSelectedStageId(chat.stages[0].id);
+                      } else {
+                        // Clear selected stage if no stages are available
+                        setSelectedStageId(null);
+                      }
+                    }}
+                  >
+                    <MessageSquare className={cn(
+                      "w-4 h-4 flex-shrink-0",
+                      (selectedChatId === chat.id && !pendingChat) ? 'text-blue-600' : 'text-gray-500'
+                    )} />
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">Chat {chat.id}</div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {new Date(chat.created_at).toLocaleDateString()}
+                      </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                  <button
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-red-50"
+                    onClick={(e) => handleDeleteChat(chat.id, e)}
+                    title="Delete chat"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                  </button>
+                </div>
               ))}
           </div>
         </>

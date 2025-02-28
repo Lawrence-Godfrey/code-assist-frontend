@@ -254,10 +254,9 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const isPending = isSendingMessage || isCreatingChat;
 
-  // For pending chats, start with an empty array until we have messages
-  // but still ensure we show any messages that appear after a pending chat becomes active
-  // We need to combine real messages with any pending user message
-  const baseMessages = isPendingChat && messages.length === 0 ? [] : messages;
+  // For pending chats, always start with an empty array
+  // We should never show previous chat messages when in pending chat state
+  const baseMessages = isPendingChat ? [] : messages;
   
   // Create a combined messages array that includes the pending user message if it exists
   const displayMessages = pendingUserMessage 
