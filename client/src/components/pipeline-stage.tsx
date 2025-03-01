@@ -2,6 +2,7 @@ import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Check, MessageSquare, Clock, AlertCircle } from "lucide-react";
 import type { PipelineStage } from "@shared/schema";
+import { cn } from "@/lib/utils";
 
 interface PipelineStageProps {
   stage: PipelineStage;
@@ -10,40 +11,32 @@ interface PipelineStageProps {
 }
 
 export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps) {
-  const getStageDescription = (name: string) => {
-    switch (name) {
-      case "Requirements Gathering":
-        return "Clarify and document project requirements";
-      case "Technical Specification":
-        return "Convert requirements into technical specifications";
-      case "Implementation":
-        return "Generate and implement code changes";
-      case "Code Review":
-        return "Review and validate code changes";
-      default:
-        return "";
-    }
-  };
-
   const statusIcons = {
-    "": null,
-    inProgress: <MessageSquare className="h-4 w-4" />,
-    waitingForApproval: <AlertCircle className="h-4 w-4" />,
-    complete: <Check className="h-4 w-4" />,
+    in_progress: <MessageSquare className="h-4 w-4" />,
+    waiting_for_approval: <Clock className="h-4 w-4" />,
+    completed: <Check className="h-4 w-4" />,
+    failed: <AlertCircle className="h-4 w-4" />,
   };
 
   const statusColors = {
-    "": "hidden",
-    inProgress: "bg-blue-500 hover:bg-blue-600",
-    waitingForApproval: "bg-yellow-500 hover:bg-yellow-600",
-    complete: "bg-green-500 hover:bg-green-600",
+    in_progress: "bg-blue-500",
+    waiting_for_approval: "bg-yellow-500",
+    completed: "bg-green-500",
+    failed: "bg-red-500",
   };
 
   const getStatusText = (status: string) => {
-    if (!status) return "";
-    if (status === "waitingForApproval") return "Waiting for Approval";
-    return status.replace(/([A-Z])/g, ' $1').trim(); // Add spaces before capital letters
+    if (status === "waiting_for_approval") return "Waiting for Approval";
+    if (status === "not_started") return "";
+    if (status === "in_progress") return "In Progress";
+    if (status === "completed") return "Completed";
+    if (status === "failed") return "Failed";
+    // Fallback format for any new statuses
+    return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
+
+  // Don't show status badge for "not_started" stages
+  const shouldShowStatus = stage.status && stage.status !== "not_started";
 
   return (
     <Card 
@@ -59,26 +52,24 @@ export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps
           <h3 className={`font-semibold ${isSelected ? 'text-primary' : ''}`}>
             {stage.name}
           </h3>
-          {stage.status && (
+          {shouldShowStatus && (
             <Badge 
-              className={`${statusColors[stage.status as keyof typeof statusColors]} text-white`}
+              className={cn(
+                "text-white",
+                statusColors[stage.status as keyof typeof statusColors]
+              )}
             >
               <div className="flex items-center gap-1">
                 {statusIcons[stage.status as keyof typeof statusIcons]}
-                <span className="capitalize">{getStatusText(stage.status)}</span>
+                <span>{getStatusText(stage.status)}</span>
               </div>
             </Badge>
           )}
         </div>
       </CardHeader>
       <CardContent className="p-4 pt-0">
-        <p className="text-sm text-gray-600">{getStageDescription(stage.name)}</p>
-        {stage.requirementsSummary && (
-          <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
-            <p className="font-medium text-gray-900">Summary:</p>
-            <p className="text-gray-600">{stage.requirementsSummary}</p>
-          </div>
-        )}
+        {/* Use the description from the backend instead of hardcoding */}
+        <p className="text-sm text-gray-600">{stage.description || "No description available"}</p>
       </CardContent>
     </Card>
   );
