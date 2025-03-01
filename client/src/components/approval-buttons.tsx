@@ -26,42 +26,52 @@ export function ApprovalButtons({ stageId, onTechSpecLoading, getStageMessages }
         status: approved ? "completed" : "in_progress",
       });
     },
-    onSuccess: async (_, approved) => {
+    onSuccess: async (response, approved) => {
       queryClient.invalidateQueries({ queryKey: ["/api/stages"] });
       
-      if (approved && stageId === 1) {
-        // Moving from Requirements to Technical Specification
-        const nextStageId = stageId + 1;
-        setSelectedStageId(nextStageId);
-        
-        // Signal that we're starting to generate the tech spec
-        onTechSpecLoading?.(true);
-        setIsGeneratingTechSpec(true);
-        
+      if (approved) {
         try {
-          // Get all messages from the requirements stage
-          const messages = await getStageMessages();
+          // Get the current stage to find the next stage ID
+          const currentStage = await pipelineService.getStage(stageId);
+          const nextStageId = currentStage.next_stage_id;
           
-          // Process through tech spec generator pipeline
-          const response = await pipelineService.processTechSpecGenerator({
-            prompt_model_name: "gpt-4",
-            message_history: messages,
-            stage_id: nextStageId,
-          });
-          
-          // Save the tech spec generator's initial response to the next stage
-          await pipelineService.sendMessage(nextStageId, {
-            role: response.response.role,
-            content: response.response.content,
-          });
-          
-          // Refresh messages for the next stage
-          queryClient.invalidateQueries({ queryKey: [`/api/stages/${nextStageId}/messages`] });
+          if (nextStageId) {
+            // Get the next stage to find its pipeline endpoint
+            const nextStage = await pipelineService.getStage(nextStageId);
+            setSelectedStageId(nextStageId);
+            
+            if (nextStage.pipeline_endpoint) {
+              // Signal that we're starting to generate content for the next stage
+              onTechSpecLoading?.(true);
+              setIsGeneratingTechSpec(true);
+              
+              // Get all messages from the current stage
+              const messages = await getStageMessages();
+              
+              // Process the next stage through its pipeline endpoint
+              const response = await pipelineService.processStage({
+                prompt_model_name: "gpt-4",
+                message_history: [],
+                previous_message_history: messages,
+                stage_id: nextStageId,
+                endpoint: nextStage.pipeline_endpoint,
+              });
+              
+              // Save the pipeline's initial response to the next stage
+              await pipelineService.sendMessage(nextStageId, {
+                role: response.response.role,
+                content: response.response.content,
+              });
+              
+              // Refresh messages for the next stage
+              queryClient.invalidateQueries({ queryKey: [`/api/stages/${nextStageId}/messages`] });
+            }
+          }
         } catch (error) {
-          console.error("Error generating tech spec:", error);
+          console.error("Error processing next stage:", error);
           toast({
             title: "Error",
-            description: "Failed to generate technical specification",
+            description: "Failed to process next stage",
             variant: "destructive",
           });
         } finally {

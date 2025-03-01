@@ -30,27 +30,15 @@ export const pipelineService = {
   processStage: (data: { 
     prompt_model_name: string, 
     message_history: { role: string, content: string }[],
+    previous_message_history?: { role: string, content: string }[],
     stage_id?: number,
     endpoint: string
   }) => api.post<PipelineResponse>(data.endpoint, {
     prompt_model_name: data.prompt_model_name,
     message_history: data.message_history,
+    previous_message_history: data.previous_message_history,
     stage_id: data.stage_id
   }),
-  
-  // Legacy functions - to be deprecated
-  processRequirementsGathering: (data: { 
-    prompt_model_name: string, 
-    message_history: { role: string, content: string }[],
-    stage_id?: number
-  }) => api.post<PipelineResponse>('/api/pipeline/requirements-gatherer', data),
-  
-  // Legacy function - to be deprecated
-  processTechSpecGenerator: (data: { 
-    prompt_model_name: string, 
-    message_history: { role: string, content: string }[],
-    stage_id?: number
-  }) => api.post<PipelineResponse>('/api/pipeline/tech-spec-generator', data),
   
   // Approve a stage
   approveStage: (stageId: number) => 

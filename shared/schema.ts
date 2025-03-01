@@ -7,7 +7,6 @@ export const pipelineStages = pgTable("pipeline_stages", {
   name: text("name").notNull(),
   description: text("description"),
   status: text("status").notNull().default("pending"),
-  requirements_summary: text("requirements_summary"),
   pipeline_endpoint: text("pipeline_endpoint"),
 });
 
@@ -22,7 +21,6 @@ export const messages = pgTable("messages", {
 export const insertPipelineStageSchema = createInsertSchema(pipelineStages).omit({ 
   id: true,
   status: true,
-  requirements_summary: true,
 });
 
 export const insertMessageSchema = createInsertSchema(messages).omit({ 

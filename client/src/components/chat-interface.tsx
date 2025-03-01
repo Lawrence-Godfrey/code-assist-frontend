@@ -125,14 +125,18 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
         // Get message history
         const messageHistory = await pipelineService.getStageMessages(actualStageId);
         
-        // Process through pipeline - use requirements gathering endpoint for initial messages
-        const response = await pipelineService.processRequirementsGathering({
+        // Get the stage to find its pipeline endpoint
+        const stage = await pipelineService.getStage(actualStageId);
+        
+        // Process through pipeline using the stage's endpoint
+        const response = await pipelineService.processStage({
           prompt_model_name: "gpt-4",
           message_history: messageHistory.map(msg => ({
             role: msg.role,
             content: msg.content,
           })),
-          stage_id: actualStageId
+          stage_id: actualStageId,
+          endpoint: stage.pipeline_endpoint
         });
         
         // Save agent response
@@ -183,7 +187,7 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
     }
   };
 
-  // Clear pending user message and check for approval needed when messages change
+  // Clear pending user message and check for approval needed or completed status when messages change
   useEffect(() => {
     if (messages.length > 0) {
       // Clear pending user message if it exists
@@ -192,10 +196,19 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
         setPendingAgentResponses([]);
       }
       
-      // Check for approval needed in the latest message
+      // Check if stage requires approval based on message content
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === 'assistant' && lastMessage.content.includes('[APPROVAL_NEEDED]')) {
         setApprovalNeeded(true);
+      }
+
+      // Check stage status to hide approval buttons if stage is completed
+      if (!isPendingChat && stageId) {
+        pipelineService.getStage(stageId).then(stage => {
+          if (stage.status === 'completed') {
+            setApprovalNeeded(false);
+          }
+        });
       }
     }
   }, [messages.length, pendingUserMessage]);
