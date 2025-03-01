@@ -125,13 +125,14 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
         // Get message history
         const messageHistory = await pipelineService.getStageMessages(actualStageId);
         
-        // Process through pipeline
-        const response = await pipelineService.processPipeline({
+        // Process through pipeline - use requirements gathering endpoint for initial messages
+        const response = await pipelineService.processRequirementsGathering({
           prompt_model_name: "gpt-4",
           message_history: messageHistory.map(msg => ({
             role: msg.role,
             content: msg.content,
-          }))
+          })),
+          stage_id: actualStageId
         });
         
         // Save agent response
@@ -182,13 +183,22 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
     }
   };
 
-  // Clear pending user message when real messages change
+  // Clear pending user message and check for approval needed when messages change
   useEffect(() => {
-    if (messages.length > 0 && pendingUserMessage) {
-      setPendingUserMessage(null);
-      setPendingAgentResponses([]);
+    if (messages.length > 0) {
+      // Clear pending user message if it exists
+      if (pendingUserMessage) {
+        setPendingUserMessage(null);
+        setPendingAgentResponses([]);
+      }
+      
+      // Check for approval needed in the latest message
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant' && lastMessage.content.includes('[APPROVAL_NEEDED]')) {
+        setApprovalNeeded(true);
+      }
     }
-  }, [messages.length]);
+  }, [messages.length, pendingUserMessage]);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
@@ -313,6 +323,15 @@ export function ChatInterface({ stageId, stageName, isPendingChat = false, onTec
           <ApprovalButtons 
             stageId={stageId} 
             onTechSpecLoading={onTechSpecLoading}
+            getStageMessages={async () => {
+              // Get all messages from the current stage
+              const stageMessages = await pipelineService.getStageMessages(stageId);
+              // Format them for the pipeline API
+              return stageMessages.map(msg => ({
+                role: msg.role,
+                content: msg.content,
+              }));
+            }}
           />
         </div>
       )}

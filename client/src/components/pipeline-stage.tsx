@@ -12,23 +12,27 @@ interface PipelineStageProps {
 
 export function PipelineStage({ stage, isSelected, onClick }: PipelineStageProps) {
   const statusIcons = {
-    inProgress: <MessageSquare className="h-4 w-4" />,
-    waitingForApproval: <Clock className="h-4 w-4" />,
+    in_progress: <MessageSquare className="h-4 w-4" />,
+    waiting_for_approval: <Clock className="h-4 w-4" />,
     completed: <Check className="h-4 w-4" />,
-    error: <AlertCircle className="h-4 w-4" />,
+    failed: <AlertCircle className="h-4 w-4" />,
   };
 
   const statusColors = {
-    inProgress: "bg-blue-500",
-    waitingForApproval: "bg-yellow-500",
+    in_progress: "bg-blue-500",
+    waiting_for_approval: "bg-yellow-500",
     completed: "bg-green-500",
-    error: "bg-red-500",
+    failed: "bg-red-500",
   };
 
   const getStatusText = (status: string) => {
-    if (status === "waitingForApproval") return "Waiting for Approval";
+    if (status === "waiting_for_approval") return "Waiting for Approval";
     if (status === "not_started") return "";
-    return status.replace(/([A-Z])/g, ' $1').trim(); // Add spaces before capital letters
+    if (status === "in_progress") return "In Progress";
+    if (status === "completed") return "Completed";
+    if (status === "failed") return "Failed";
+    // Fallback format for any new statuses
+    return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
   // Don't show status badge for "not_started" stages

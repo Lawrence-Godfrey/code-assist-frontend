@@ -26,11 +26,31 @@ export const pipelineService = {
   sendMessage: (stageId: number, message: { role: string, content: string }) => 
     api.post<Message>(`/api/stages/${stageId}/messages`, message),
   
-  // Process messages through the pipeline
-  processPipeline: (data: { 
+  // Generic process stage function that uses the endpoint from the stage
+  processStage: (data: { 
     prompt_model_name: string, 
-    message_history: { role: string, content: string }[] 
-  }) => api.post<PipelineResponse>('/api/pipeline', data),
+    message_history: { role: string, content: string }[],
+    stage_id?: number,
+    endpoint: string
+  }) => api.post<PipelineResponse>(data.endpoint, {
+    prompt_model_name: data.prompt_model_name,
+    message_history: data.message_history,
+    stage_id: data.stage_id
+  }),
+  
+  // Legacy functions - to be deprecated
+  processRequirementsGathering: (data: { 
+    prompt_model_name: string, 
+    message_history: { role: string, content: string }[],
+    stage_id?: number
+  }) => api.post<PipelineResponse>('/api/pipeline/requirements-gatherer', data),
+  
+  // Legacy function - to be deprecated
+  processTechSpecGenerator: (data: { 
+    prompt_model_name: string, 
+    message_history: { role: string, content: string }[],
+    stage_id?: number
+  }) => api.post<PipelineResponse>('/api/pipeline/tech-spec-generator', data),
   
   // Approve a stage
   approveStage: (stageId: number) => 

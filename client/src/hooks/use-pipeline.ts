@@ -42,13 +42,24 @@ export function usePipeline(stageId: number | null) {
       // Get the message history
       const messageHistory = await pipelineService.getStageMessages(finalStageId!);
       
+      // Get the stage details first to determine which endpoint to use
+      const stage = await pipelineService.getStage(finalStageId!);
+      
       // Process the message through the pipeline
-      const response = await pipelineService.processPipeline({
+      // We'll need to update the backend to include the endpoint in the StageResponse
+      if (!stage.pipeline_endpoint) {
+        throw new Error('Pipeline endpoint not specified for this stage');
+      }
+      
+      // Use the pipeline endpoint from the stage
+      const response = await pipelineService.processStage({
         prompt_model_name: 'gpt-4',
         message_history: messageHistory.map(msg => ({
           role: msg.role,
           content: msg.content,
         })),
+        stage_id: finalStageId,
+        endpoint: stage.pipeline_endpoint,
       });
       
       // Save the agent response
